@@ -1,0 +1,85 @@
+# 项目主配置文件
+
+# 项目信息
+project:
+  name: "退役数据中心芯片二次利用项目"
+  version: "1.0.0"
+  start_date: "2026-05-26"
+  end_date: "2026-12-31"
+
+# 数据配置
+data:
+  raw_path: "data/raw/"
+  synthetic_path: "data/synthetic/"
+  processed_path: "data/processed/"
+  
+  # 数据集参数
+  n_samples: 1000
+  n_features: 28
+  n_aging_points: 168  # 小时
+  n_failure_samples: 100
+
+# 模型配置
+models:
+  phase1_knowledge_graph:
+    entity_dim: 100
+    learning_rate: 0.001
+    epochs: 100
+    batch_size: 32
+    
+  phase2_feature_extraction:
+    gcn_hidden_dims: [64, 32]
+    gat_heads: 8
+    learning_rate: 0.001
+    epochs: 50
+    
+  phase3_rl:
+    state_dim: 28
+    action_dim: 10
+    learning_rate: 3e-4
+    episodes: 10000
+    
+  phase4_incremental:
+    batch_size: 32
+    learning_rate: 0.001
+    update_frequency: 1000
+    
+  phase5_compatibility:
+    hidden_dims: [128, 64, 32]
+    dropout: 0.3
+    learning_rate: 0.001
+    target_accuracy: 0.95
+    
+  phase6_integration:
+    api_port: 8000
+    max_workers: 4
+
+# 结果配置
+results:
+  model_path: "results/models/"
+  figure_path: "results/figures/"
+  report_path: "results/reports/"
+  
+# 日志配置
+logging:
+  level: "INFO"
+  log_dir: "logs/"
+  format: "[%(asctime)s] [%(levelname)s] %(message)s"
+
+# 实验配置
+experiment:
+  random_seed: 42
+  test_split: 0.2
+  validation_split: 0.1
+
+# 验收标准
+acceptance_criteria:
+  phase1_min_entities: 500
+  phase1_min_relations: 1000
+  phase2_min_accuracy: 0.88
+  phase3_min_efficiency: 0.30  # 检测时间降低比例
+  phase4_min_transfer_accuracy: 0.88
+  phase5_min_compatibility_accuracy: 0.95
+  phase6_min_disassembly_rate: 0.99
+  phase6_min_non_destructive_rate: 0.95
+  phase6_min_sorting_rate: 0.99

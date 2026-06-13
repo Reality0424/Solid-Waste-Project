@@ -1,0 +1,27 @@
+{
+  "Chip": {
+    "count": 554,
+    "attributes": [
+      "id",
+      "model",
+      "batch_id",
+      "manufacturing_date"
+    ]
+  },
+  "TestStage": {
+    "count": 5,
+    "attributes": [
+      "stage_id",
+      "stage_name",
+      "description"
+    ]
+  },
+  "Parameter": {
+    "count": 35,
+    "attributes": [
+      "param_id",
+      "param_name",
+      "data_type"
+    ]
+  }
+}

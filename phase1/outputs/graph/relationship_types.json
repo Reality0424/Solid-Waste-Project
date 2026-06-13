@@ -1,0 +1,39 @@
+{
+  "UNDERGOES_TEST": {
+    "from": "Chip",
+    "to": "TestStage",
+    "description": "芯片进行测试",
+    "properties": [
+      "test_date",
+      "result"
+    ]
+  },
+  "MEASURES": {
+    "from": "TestStage",
+    "to": "Parameter",
+    "description": "测试阶段测量参数",
+    "properties": [
+      "measured_value",
+      "unit",
+      "tolerance"
+    ]
+  },
+  "DEPENDS_ON": {
+    "from": "TestStage",
+    "to": "TestStage",
+    "description": "测试阶段依赖关系",
+    "properties": [
+      "sequence",
+      "condition"
+    ]
+  },
+  "HAS_METRIC": {
+    "from": "Chip",
+    "to": "Parameter",
+    "description": "芯片具有参数",
+    "properties": [
+      "value",
+      "timestamp"
+    ]
+  }
+}

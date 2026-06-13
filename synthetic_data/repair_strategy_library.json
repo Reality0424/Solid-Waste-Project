@@ -1,0 +1,26 @@
+{
+  "physical_damage": {
+    "description": "Physical damage detected",
+    "repair_method": "Component replacement or rejection",
+    "success_rate": 0.0,
+    "cost_yuan": 0
+  },
+  "thermal_accumulation": {
+    "description": "Thermal degradation detected",
+    "repair_method": "Thermal management enhancement, derate operation",
+    "success_rate": 0.85,
+    "cost_yuan": 150
+  },
+  "noise_margin_insufficient": {
+    "description": "Signal integrity issue detected",
+    "repair_method": "Frequency derate, voltage adjustment",
+    "success_rate": 0.75,
+    "cost_yuan": 80
+  },
+  "multi_param_combined": {
+    "description": "Multiple parameter degradation detected",
+    "repair_method": "Limited application scope, frequency cap",
+    "success_rate": 0.6,
+    "cost_yuan": 120
+  }
+}

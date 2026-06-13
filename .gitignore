@@ -1,0 +1,58 @@
+# 环境与依赖
+.env
+.venv
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Python缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE与编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 数据与模型（太大，不上传）
+/data/raw/**
+/data/processed/**
+*.pkl
+*.h5
+*.pth
+*.pt
+*.pb
+*.joblib
+
+# 结果文件
+/results/models/**
+/results/figures/**
+results/*.png
+results/*.jpg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# OS特定
+Thumbs.db
+.DS_Store

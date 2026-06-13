@@ -1,0 +1,101 @@
+chip_id,failure_mode,failure_time_hours,failure_phenomenon,root_cause,predicted_mttf_hours
+CHIP_00023,physical_damage,17,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,34
+CHIP_00039,thermal_accumulation,71,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,142
+CHIP_00049,noise_margin_insufficient,22,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,44
+CHIP_00053,thermal_accumulation,101,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,202
+CHIP_00054,noise_margin_insufficient,159,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,318
+CHIP_00073,thermal_accumulation,63,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,126
+CHIP_00074,multi_param_combined,72,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,144
+CHIP_00079,thermal_accumulation,69,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,138
+CHIP_00107,multi_param_combined,14,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,28
+CHIP_00116,thermal_accumulation,90,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,180
+CHIP_00117,thermal_accumulation,140,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,280
+CHIP_00119,multi_param_combined,32,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,64
+CHIP_00122,multi_param_combined,73,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,146
+CHIP_00147,noise_margin_insufficient,121,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,242
+CHIP_00156,noise_margin_insufficient,17,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,34
+CHIP_00163,thermal_accumulation,74,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,148
+CHIP_00165,thermal_accumulation,57,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,114
+CHIP_00172,noise_margin_insufficient,13,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,26
+CHIP_00198,physical_damage,25,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,50
+CHIP_00204,noise_margin_insufficient,23,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,46
+CHIP_00226,physical_damage,13,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,26
+CHIP_00236,noise_margin_insufficient,30,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,60
+CHIP_00263,noise_margin_insufficient,68,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,136
+CHIP_00270,thermal_accumulation,44,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,88
+CHIP_00273,multi_param_combined,47,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,94
+CHIP_00275,noise_margin_insufficient,21,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,42
+CHIP_00276,multi_param_combined,61,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,122
+CHIP_00288,noise_margin_insufficient,31,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,62
+CHIP_00290,noise_margin_insufficient,92,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,184
+CHIP_00292,noise_margin_insufficient,47,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,94
+CHIP_00296,multi_param_combined,163,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,326
+CHIP_00298,noise_margin_insufficient,166,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,332
+CHIP_00305,noise_margin_insufficient,48,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,96
+CHIP_00307,thermal_accumulation,120,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,240
+CHIP_00322,thermal_accumulation,136,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,272
+CHIP_00325,multi_param_combined,14,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,28
+CHIP_00327,noise_margin_insufficient,12,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,24
+CHIP_00334,noise_margin_insufficient,19,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,38
+CHIP_00336,thermal_accumulation,101,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,202
+CHIP_00346,physical_damage,50,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,100
+CHIP_00350,noise_margin_insufficient,83,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,166
+CHIP_00367,noise_margin_insufficient,72,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,144
+CHIP_00369,physical_damage,66,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,132
+CHIP_00371,physical_damage,20,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,40
+CHIP_00398,multi_param_combined,85,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,170
+CHIP_00431,physical_damage,16,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,32
+CHIP_00445,noise_margin_insufficient,87,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,174
+CHIP_00448,thermal_accumulation,122,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,244
+CHIP_00452,thermal_accumulation,67,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,134
+CHIP_00454,multi_param_combined,68,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,136
+CHIP_00461,thermal_accumulation,47,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,94
+CHIP_00472,multi_param_combined,33,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,66
+CHIP_00523,multi_param_combined,22,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,44
+CHIP_00525,multi_param_combined,97,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,194
+CHIP_00543,thermal_accumulation,77,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,154
+CHIP_00548,thermal_accumulation,88,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,176
+CHIP_00560,multi_param_combined,18,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,36
+CHIP_00585,noise_margin_insufficient,112,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,224
+CHIP_00590,thermal_accumulation,80,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,160
+CHIP_00615,thermal_accumulation,27,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,54
+CHIP_00623,noise_margin_insufficient,19,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,38
+CHIP_00633,multi_param_combined,52,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,104
+CHIP_00637,multi_param_combined,46,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,92
+CHIP_00644,thermal_accumulation,69,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,138
+CHIP_00663,thermal_accumulation,99,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,198
+CHIP_00669,thermal_accumulation,158,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,316
+CHIP_00670,multi_param_combined,61,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,122
+CHIP_00676,physical_damage,11,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,22
+CHIP_00679,multi_param_combined,103,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,206
+CHIP_00687,thermal_accumulation,106,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,212
+CHIP_00693,physical_damage,46,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,92
+CHIP_00696,multi_param_combined,10,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,20
+CHIP_00698,noise_margin_insufficient,33,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,66
+CHIP_00717,physical_damage,90,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,180
+CHIP_00725,physical_damage,22,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,44
+CHIP_00726,noise_margin_insufficient,36,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,72
+CHIP_00732,thermal_accumulation,74,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,148
+CHIP_00747,multi_param_combined,68,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,136
+CHIP_00756,thermal_accumulation,141,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,282
+CHIP_00762,thermal_accumulation,105,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,210
+CHIP_00781,noise_margin_insufficient,11,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,22
+CHIP_00788,thermal_accumulation,160,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,320
+CHIP_00794,thermal_accumulation,34,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,68
+CHIP_00800,noise_margin_insufficient,39,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,78
+CHIP_00810,thermal_accumulation,80,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,160
+CHIP_00820,noise_margin_insufficient,18,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,36
+CHIP_00821,noise_margin_insufficient,36,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,72
+CHIP_00822,noise_margin_insufficient,11,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,22
+CHIP_00826,noise_margin_insufficient,10,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,20
+CHIP_00836,noise_margin_insufficient,58,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,116
+CHIP_00862,noise_margin_insufficient,27,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,54
+CHIP_00871,noise_margin_insufficient,52,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,104
+CHIP_00881,thermal_accumulation,35,"Thermal runaway, power consumption surged, shutdown protection triggered",Parameter degradation due to thermal_accumulation,70
+CHIP_00884,noise_margin_insufficient,36,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,72
+CHIP_00912,noise_margin_insufficient,35,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,70
+CHIP_00916,noise_margin_insufficient,143,"Signal integrity failure, intermittent errors",Parameter degradation due to noise_margin_insufficient,286
+CHIP_00921,physical_damage,71,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,142
+CHIP_00930,multi_param_combined,94,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,188
+CHIP_00932,physical_damage,42,"Physical connection broken, device disconnected",Parameter degradation due to physical_damage,84
+CHIP_00992,multi_param_combined,70,"Timing violation, failed functional tests at high frequency",Parameter degradation due to multi_param_combined,140
