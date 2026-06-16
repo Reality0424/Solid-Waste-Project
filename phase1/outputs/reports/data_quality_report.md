@@ -1,6 +1,6 @@
 # Phase 1 数据质量报告
 
-**生成时间**: 2026-06-16T11:14:43.243207
+**生成时间**: 2026-06-16T18:25:11.721749
 
 ## 📊 数据概览
 
@@ -18,11 +18,11 @@
 - 移除行数: 0
 
 ### 极端值（分位裁剪，不删行）
-- 裁剪数值点: 230
+- 裁剪数值点: 320
 
 ### 标签
-- 正常样本: 900
-- 失效样本: 100
+- 正常样本: 901
+- 失效样本: 99
 
 ## ✅ 验证结果
 
@@ -42,20 +42,20 @@
 | pin_coplanarity_percent | float64 |
 | package_size_deviation_percent | float64 |
 | vdd_voltage | float64 |
-| idd_static_ma | float64 |
-| idd_dynamic_ma | float64 |
 | voh_voltage | float64 |
 | vol_voltage | float64 |
 | vih_voltage | float64 |
 | vil_voltage | float64 |
 | iil_leakage_ua | float64 |
 | iol_leakage_ua | float64 |
+| fmax_mhz | float64 |
 | setup_time_ns | float64 |
 | hold_time_ns | float64 |
 | propagation_delay_ns | float64 |
 | rise_time_ns | float64 |
 | fall_time_ns | float64 |
-| fmax_mhz | float64 |
+| idd_static_ma | float64 |
+| idd_dynamic_ma | float64 |
 | jtag_scan_pass | int64 |
 | boundary_scan_pass | int64 |
 | functional_test_pass | int64 |

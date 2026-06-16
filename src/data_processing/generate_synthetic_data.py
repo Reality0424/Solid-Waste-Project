@@ -1,397 +1,269 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-芯片再制造可靠性评估 - 合成数据生成器
-生成1000个合成芯片样本，包含隐性故障模式
+芯片再制造可靠性评估 - 合成数据生成器 (v2, 真实隐性故障版)
 
-生成数据集包括：
-1. chip_baseline_data.csv - 基础参数（每个芯片1行）
-2. chip_aging_curves.csv - 老化曲线（时间序列）
-3. chip_failure_labels.csv - 失效标签和根本原因
+相比 v1 的关键升级（针对数据审计发现的问题）:
+1. 物理耦合: 参数不再各自独立随机, 而是按工程关系联动
+   - 动态功耗 IDD ∝ 频率 Fmax (P ∝ C·V²·f)
+   - 传输延迟/建立/保持时间 与 Fmax 负相关(同受"工艺速度"潜变量驱动)
+   - VOH/VIH/VIL 跟随 VDD
+2. 真正的"隐性组合故障": 失效不再是给单指标加大偏移(单查即露馅),
+   而是由多个"各自仍在规格内"的轻度劣化指标的【乘积式交互】触发。
+   => 任一单指标都不极端, 线性/单指标模型抓不住, 必须靠非线性/图模型学交互。
+3. aging_temperature_c 不再是常量(85/125 两档), 老化漂移与初始应力耦合。
+4. 加入量测噪声; 修正硬编码输出路径(改为相对仓库根目录)。
+
+产出(schema 与 v1 一致, 不影响下游 Phase 1):
+1. chip_baseline_data.csv - 基础参数(每芯片1行)
+2. chip_aging_curves.csv  - 老化漂移时间序列
+3. chip_failure_labels.csv - 失效标注与根因
 """
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-import os
+from pathlib import Path
 
-# 设置随机种子以保证可重复性
-np.random.seed(42)
+SEED = 42
 
-def generate_baseline_data(n_chips=1000):
-    """
-    生成芯片基础参数数据
-    
-    包含：
-    - 物理参数（6项）
-    - 电气参数（直流9项 + 交流6项）
-    - 功能测试结果（3类）
-    """
-    
-    print("生成基础参数数据...")
-    
+# 非物理损伤型失效目标占比(隐性), 物理损伤型(显性)单列
+TARGET_FAILURE_RATE = 0.10
+PHYSICAL_DAMAGE_FRAC = 0.25   # 失效中约 1/4 是显性物理损伤, 其余 3/4 为隐性组合
+
+
+def _sig(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _z(a):
+    a = np.asarray(a, dtype=float)
+    s = a.std()
+    return (a - a.mean()) / (s if s > 1e-9 else 1.0)
+
+
+def generate_baseline_data(n_chips, rng):
+    """生成带物理耦合的芯片基础参数(此时全部为"健康"分布, 失效在后续按交互规则注入)"""
+    print("生成基础参数数据(含物理耦合)...")
+
+    # ---- 潜变量: 工艺速度 (越大 = 越快的硅片: 高 Fmax / 低延迟) ----
+    speed = rng.normal(0, 1, n_chips)
+
     data = {
         'chip_id': [f'CHIP_{i:05d}' for i in range(n_chips)],
-        'production_date': [f'2024-{np.random.randint(1,13):02d}-{np.random.randint(1,29):02d}' 
-                           for _ in range(n_chips)],
-        'chip_model': [np.random.choice(['MODEL_A', 'MODEL_B', 'MODEL_C']) 
-                      for _ in range(n_chips)],
+        'production_date': [f'2024-{rng.integers(1,13):02d}-{rng.integers(1,29):02d}'
+                            for _ in range(n_chips)],
+        'chip_model': rng.choice(['MODEL_A', 'MODEL_B', 'MODEL_C'], n_chips),
     }
-    
-    # ========== 物理参数 ==========
-    # 1. 引脚平整度偏差 (0-50 μm, 平均20μm)
-    data['pin_flatness_deviation_um'] = np.random.normal(20, 8, n_chips)
-    data['pin_flatness_deviation_um'] = np.clip(data['pin_flatness_deviation_um'], 0, 50)
-    
-    # 2. 焊盘氧化程度 (0-100%, 平均15%)
-    data['solder_pad_oxidation_percent'] = np.random.normal(15, 10, n_chips)
-    data['solder_pad_oxidation_percent'] = np.clip(data['solder_pad_oxidation_percent'], 0, 100)
-    
-    # 3. 封装划痕深度 (0-100 μm, 平均10μm)
-    data['package_scratch_depth_um'] = np.random.exponential(10, n_chips)
-    data['package_scratch_depth_um'] = np.clip(data['package_scratch_depth_um'], 0, 100)
-    
-    # 4. 翘曲度 (0-200 μm, 平均60μm)
-    data['warpage_um'] = np.random.normal(60, 30, n_chips)
-    data['warpage_um'] = np.clip(data['warpage_um'], 0, 200)
-    
-    # 5. 引脚共面度 (80-100%, 平均95%)
-    data['pin_coplanarity_percent'] = np.random.normal(95, 3, n_chips)
-    data['pin_coplanarity_percent'] = np.clip(data['pin_coplanarity_percent'], 80, 100)
-    
-    # 6. 封装尺寸偏差 (-5% ~ +5%, 平均0%)
-    data['package_size_deviation_percent'] = np.random.normal(0, 2, n_chips)
-    data['package_size_deviation_percent'] = np.clip(data['package_size_deviation_percent'], -5, 5)
-    
-    # ========== 直流(DC)电气参数 ==========
-    # 7. 供电电压 VDD (3.0-3.3V, 标称3.3V ±5%)
-    data['vdd_voltage'] = np.random.normal(3.3, 0.08, n_chips)
-    data['vdd_voltage'] = np.clip(data['vdd_voltage'], 3.135, 3.465)  # ±5% of 3.3V
-    
-    # 8. 静态功耗 IDD_static (mA, 正常<10mA)
-    data['idd_static_ma'] = np.random.exponential(5, n_chips)
-    data['idd_static_ma'] = np.clip(data['idd_static_ma'], 0.1, 20)
-    
-    # 9. 动态功耗 IDD_dynamic (mA, 50-200mA)
-    data['idd_dynamic_ma'] = np.random.normal(120, 40, n_chips)
-    data['idd_dynamic_ma'] = np.clip(data['idd_dynamic_ma'], 50, 200)
-    
-    # 10. 输出电压高 VOH (应接近VDD, 正常>3.0V)
-    data['voh_voltage'] = data['vdd_voltage'] - np.random.normal(0.2, 0.1, n_chips)
-    data['voh_voltage'] = np.clip(data['voh_voltage'], 2.8, 3.3)
-    
-    # 11. 输出电压低 VOL (应接近0V, 正常<0.5V)
-    data['vol_voltage'] = np.random.normal(0.2, 0.1, n_chips)
-    data['vol_voltage'] = np.clip(data['vol_voltage'], 0.05, 0.5)
-    
-    # 12. 输入阈值高 VIH (应>VDD×0.7, 正常>2.3V)
-    vih_target = data['vdd_voltage'] * 0.72
-    data['vih_voltage'] = vih_target + np.random.normal(0, 0.1, n_chips)
-    data['vih_voltage'] = np.clip(data['vih_voltage'], 2.2, 2.5)
-    
-    # 13. 输入阈值低 VIL (应<VDD×0.3, 正常<1.0V)
-    vil_target = data['vdd_voltage'] * 0.28
-    data['vil_voltage'] = vil_target + np.random.normal(0, 0.1, n_chips)
-    data['vil_voltage'] = np.clip(data['vil_voltage'], 0.5, 1.1)
-    
-    # 14. 输入漏电流 IIL (μA, 正常<1μA)
-    data['iil_leakage_ua'] = np.random.exponential(0.3, n_chips)
-    data['iil_leakage_ua'] = np.clip(data['iil_leakage_ua'], 0.01, 5)
-    
-    # 15. 输出漏电流 IOL (μA, 正常<10μA)
-    data['iol_leakage_ua'] = np.random.exponential(2, n_chips)
-    data['iol_leakage_ua'] = np.clip(data['iol_leakage_ua'], 0.1, 20)
-    
-    # ========== 交流(AC)参数 ==========
-    # 16. 建立时间 tSU (ns, 正常1-5ns)
-    data['setup_time_ns'] = np.random.normal(3.5, 1, n_chips)
-    data['setup_time_ns'] = np.clip(data['setup_time_ns'], 1, 8)
-    
-    # 17. 保持时间 tH (ns, 正常1-3ns)
-    data['hold_time_ns'] = np.random.normal(2, 0.8, n_chips)
-    data['hold_time_ns'] = np.clip(data['hold_time_ns'], 0.5, 5)
-    
-    # 18. 传输延迟 tPD (ns, 正常2-10ns)
-    data['propagation_delay_ns'] = np.random.normal(6, 2, n_chips)
-    data['propagation_delay_ns'] = np.clip(data['propagation_delay_ns'], 2, 15)
-    
-    # 19. 上升时间 tR (ns, 正常0.5-2ns)
-    data['rise_time_ns'] = np.random.normal(1.2, 0.4, n_chips)
-    data['rise_time_ns'] = np.clip(data['rise_time_ns'], 0.3, 3)
-    
-    # 20. 下降时间 tF (ns, 正常0.5-2ns)
-    data['fall_time_ns'] = np.random.normal(1.1, 0.4, n_chips)
-    data['fall_time_ns'] = np.clip(data['fall_time_ns'], 0.3, 3)
-    
-    # 21. 最高工作频率 Fmax (MHz, 假设200-400MHz)
-    data['fmax_mhz'] = np.random.normal(300, 50, n_chips)
-    data['fmax_mhz'] = np.clip(data['fmax_mhz'], 200, 400)
-    
-    # ========== 功能测试结果 ==========
-    # 22-24. 功能测试 (1=通过, 0=失败)
-    data['jtag_scan_pass'] = np.random.binomial(1, 0.95, n_chips)  # 95%通过率
-    data['boundary_scan_pass'] = np.random.binomial(1, 0.97, n_chips)  # 97%通过率
-    data['functional_test_pass'] = np.random.binomial(1, 0.96, n_chips)  # 96%通过率
-    
-    # ========== 老化条件 ==========
-    # 25-28. 老化条件定义
-    data['aging_temperature_c'] = np.full(n_chips, 85)  # 恒温85°C
-    data['aging_voltage_v'] = data['vdd_voltage']  # 按名义值
-    data['aging_frequency_mhz'] = data['fmax_mhz'] * 0.9  # 90%工作频率
-    data['aging_duration_hours'] = np.random.choice([24, 48, 72, 96, 120, 168], n_chips)
-    
-    df = pd.DataFrame(data)
-    return df
+
+    # ---- 物理参数(与电气相对独立, 符合实际) ----
+    data['pin_flatness_deviation_um'] = np.clip(rng.normal(20, 8, n_chips), 0, 50)
+    data['solder_pad_oxidation_percent'] = np.clip(rng.normal(15, 8, n_chips), 0, 100)
+    data['package_scratch_depth_um'] = np.clip(rng.exponential(10, n_chips), 0, 100)
+    data['warpage_um'] = np.clip(rng.normal(60, 28, n_chips), 0, 200)
+    data['pin_coplanarity_percent'] = np.clip(rng.normal(95, 3, n_chips), 80, 100)
+    data['package_size_deviation_percent'] = np.clip(rng.normal(0, 2, n_chips), -5, 5)
+
+    # ---- DC: 供电与逻辑电平(VOH/VIH/VIL 跟随 VDD) ----
+    vdd = np.clip(rng.normal(3.3, 0.05, n_chips), 3.135, 3.465)
+    data['vdd_voltage'] = vdd
+    data['voh_voltage'] = np.clip(vdd - rng.uniform(0.15, 0.28, n_chips), 2.7, 3.3)
+    data['vol_voltage'] = np.clip(rng.normal(0.18, 0.06, n_chips), 0.05, 0.5)
+    data['vih_voltage'] = np.clip(vdd * 0.72 + rng.normal(0, 0.06, n_chips), 2.2, 2.6)
+    data['vil_voltage'] = np.clip(vdd * 0.28 + rng.normal(0, 0.06, n_chips), 0.45, 1.1)
+    data['iil_leakage_ua'] = np.clip(rng.exponential(0.3, n_chips), 0.01, 5)
+    data['iol_leakage_ua'] = np.clip(rng.exponential(2.0, n_chips), 0.1, 20)
+
+    # ---- AC: 速度类参数由 speed 潜变量驱动(彼此相关, 与 Fmax 负相关) ----
+    data['fmax_mhz'] = np.clip(300 + 45 * speed + rng.normal(0, 12, n_chips), 200, 400)
+    data['setup_time_ns'] = np.clip(3.5 - 0.55 * speed + rng.normal(0, 0.5, n_chips), 1, 8)
+    data['hold_time_ns'] = np.clip(2.0 - 0.28 * speed + rng.normal(0, 0.4, n_chips), 0.5, 5)
+    data['propagation_delay_ns'] = np.clip(6.0 - 1.3 * speed + rng.normal(0, 1.0, n_chips), 2, 15)
+    data['rise_time_ns'] = np.clip(1.2 - 0.18 * speed + rng.normal(0, 0.3, n_chips), 0.3, 3)
+    data['fall_time_ns'] = np.clip(1.1 - 0.18 * speed + rng.normal(0, 0.3, n_chips), 0.3, 3)
+
+    # ---- 动态功耗 ∝ 频率(P ∝ C·V²·f) + 电压 ----
+    fmax = data['fmax_mhz']
+    data['idd_static_ma'] = np.clip(rng.exponential(3.0, n_chips), 0.1, 15)
+    data['idd_dynamic_ma'] = np.clip(
+        40 + 0.30 * (fmax - 200) + 60 * (vdd - 3.3) + rng.normal(0, 12, n_chips), 50, 260)
+
+    # ---- 功能测试 ----
+    data['jtag_scan_pass'] = rng.binomial(1, 0.97, n_chips)
+    data['boundary_scan_pass'] = rng.binomial(1, 0.98, n_chips)
+    data['functional_test_pass'] = rng.binomial(1, 0.97, n_chips)
+
+    # ---- 老化条件(温度两档 + 与频率耦合) ----
+    data['aging_temperature_c'] = rng.choice([85, 125], n_chips, p=[0.7, 0.3])
+    data['aging_voltage_v'] = vdd
+    data['aging_frequency_mhz'] = fmax * 0.9
+    data['aging_duration_hours'] = rng.choice([24, 48, 72, 96, 120, 168], n_chips)
+
+    return pd.DataFrame(data), speed
 
 
-def add_failure_patterns_to_baseline(df):
+def assign_interaction_failures(df, rng):
     """
-    为基础数据添加故障模式
-    
-    故障模式：
-    1. 物理损伤型故障 (20%)
-    2. 噪声边裕不足型 (30%)
-    3. 热积累型 (25%)
-    4. 多参数叠加型 (25%)
+    按【合取-析取交互】注入失效:
+      失效区是多个『不同指标子空间里的角落(两两同时劣化)』的【并集】(非凸),
+      且各贡献指标都仅轻度劣化(仍在规格内)。
+      => 单查不露馅; 因失效区非凸, 单个线性超平面无法刻画(会被大量"单项偏高但不失效"的
+         诱饵芯片误判), 必须靠非线性/图模型学习指标间的交互。
+      - 物理损伤(显性): 少量芯片单指标极端 -> 容易识别(模拟真实里"一眼可见"的坏件)。
     """
-    
-    print("添加故障模式...")
-    
-    # 初始化故障标签 (0=故障品, 1=正常品)
-    n_chips = len(df)
-    n_failures = int(n_chips * 0.1)  # 10%故障率
-    
-    df['failure_status'] = np.ones(n_chips, dtype=int)  # 默认全部正常
-    failure_indices = np.random.choice(n_chips, n_failures, replace=False)
-    df.loc[failure_indices, 'failure_status'] = 0
-    
-    # 为故障品分配失效模式
-    failure_modes = ['physical_damage', 'noise_margin_insufficient', 
-                     'thermal_accumulation', 'multi_param_combined']
+    print("按合取-析取交互注入失效(非凸隐性组合 + 少量显性物理损伤)...")
+    n = len(df)
+
+    def adv(col, sign):
+        """某指标的'劣化量': 仅当超过 +0.3σ 才开始计入(relu), sign 控制方向"""
+        return np.maximum(sign * _z(df[col]) - 0.3, 0.0)
+
+    # --- 机制1: 噪声边裕 = min(高电平裕量, 低电平裕量); 任一坍塌即失效(析取) ---
+    nm_high = adv('vih_voltage', +1) * adv('voh_voltage', -1)   # VIH↑ 且 VOH↓ -> 高侧裕量小
+    nm_low = adv('vol_voltage', +1) * adv('vil_voltage', -1)    # VOL↑ 且 VIL↓ -> 低侧裕量小
+    trig_noise = np.maximum(nm_high, nm_low)
+
+    # --- 机制2: 时序 = 高频 且 (建立紧 或 延迟高) (合取, 不同子空间) ---
+    trig_timing = adv('fmax_mhz', +1) * (adv('setup_time_ns', +1) + 0.8 * adv('propagation_delay_ns', +1))
+
+    # --- 机制3: 热积累 = 高功耗 且 (翘曲 或 漏电), 高温放大 ---
+    temp_amp = 1.0 + 0.8 * np.maximum((df['aging_temperature_c'].values - 85) / 40.0, 0.0)
+    trig_thermal = adv('idd_dynamic_ma', +1) * (adv('warpage_um', +1) + adv('iol_leakage_ua', +1)) * temp_amp
+
+    mech = [trig_noise, trig_timing, trig_thermal]
+    mech = [m + rng.normal(0, 0.02, n) for m in mech]
+    mode_names = np.array(['noise_margin_insufficient', 'multi_param_combined', 'thermal_accumulation'])
+
+    # 每个机制各取触发量最高的 top-k, 取并集(析取) -> 失效区 = 三个不同子空间角落的并集(非凸)
+    n_hidden = int(round(n * TARGET_FAILURE_RATE * (1 - PHYSICAL_DAMAGE_FRAC)))
+    k = int(round(n_hidden / 3))
+    is_hidden = np.zeros(n, dtype=bool)
+    for trig in mech:
+        is_hidden[np.argsort(trig)[::-1][:k]] = True
+
+    # 主导模式 = 相对各自分布最异常的那个机制
+    trig_z = np.vstack([_z(mech[0]), _z(mech[1]), _z(mech[2])]).T
+    dominant = mode_names[np.argmax(trig_z, axis=1)]
+    strongest = np.vstack(mech).T.max(axis=1)
+
+    df['failure_status'] = np.ones(n, dtype=int)   # 1=正常, 0=失效
     df['failure_mode'] = 'normal'
-    
-    for idx in failure_indices:
-        mode = np.random.choice(failure_modes, p=[0.2, 0.3, 0.25, 0.25])
-        df.loc[idx, 'failure_mode'] = mode
-        
-        # 根据失效模式调整参数
-        if mode == 'physical_damage':
-            # 引脚平整度、翘曲度增加
-            df.loc[idx, 'pin_flatness_deviation_um'] += np.random.uniform(15, 30)
-            df.loc[idx, 'warpage_um'] += np.random.uniform(50, 100)
-            df.loc[idx, 'package_scratch_depth_um'] += np.random.uniform(30, 60)
-        
-        elif mode == 'noise_margin_insufficient':
-            # VOH、VOL接近 VIH、VIL
-            df.loc[idx, 'voh_voltage'] -= np.random.uniform(0.15, 0.3)
-            df.loc[idx, 'vol_voltage'] += np.random.uniform(0.15, 0.3)
-            df.loc[idx, 'vih_voltage'] += np.random.uniform(0.1, 0.2)
-            df.loc[idx, 'vil_voltage'] -= np.random.uniform(0.1, 0.2)
-        
-        elif mode == 'thermal_accumulation':
-            # 高功耗 + 高翘曲度 + 长老化时间
-            df.loc[idx, 'idd_dynamic_ma'] += np.random.uniform(50, 100)
-            df.loc[idx, 'warpage_um'] += np.random.uniform(40, 80)
-            df.loc[idx, 'aging_duration_hours'] = 168
-            df.loc[idx, 'package_scratch_depth_um'] += np.random.uniform(20, 40)
-        
-        elif mode == 'multi_param_combined':
-            # 多个参数同时接近限值
-            df.loc[idx, 'setup_time_ns'] += np.random.uniform(2, 4)
-            df.loc[idx, 'hold_time_ns'] += np.random.uniform(2, 3)
-            df.loc[idx, 'propagation_delay_ns'] += np.random.uniform(3, 6)
-            df.loc[idx, 'voh_voltage'] -= np.random.uniform(0.1, 0.2)
-            df.loc[idx, 'vol_voltage'] += np.random.uniform(0.1, 0.2)
-            df.loc[idx, 'idd_dynamic_ma'] += np.random.uniform(30, 60)
-    
+    df.loc[is_hidden, 'failure_status'] = 0
+    df.loc[is_hidden, 'failure_mode'] = dominant[is_hidden]
+
+    # ---- 显性物理损伤: 在仍正常的芯片里挑少量, 注入极端物理参数 ----
+    n_phys = int(round(n * TARGET_FAILURE_RATE * PHYSICAL_DAMAGE_FRAC))
+    normal_idx = np.where(df['failure_status'].values == 1)[0]
+    phys_idx = rng.choice(normal_idx, size=min(n_phys, len(normal_idx)), replace=False)
+    df.loc[phys_idx, 'warpage_um'] = np.clip(df.loc[phys_idx, 'warpage_um'] + rng.uniform(70, 120, len(phys_idx)), 0, 200)
+    df.loc[phys_idx, 'package_scratch_depth_um'] = np.clip(df.loc[phys_idx, 'package_scratch_depth_um'] + rng.uniform(40, 70, len(phys_idx)), 0, 100)
+    df.loc[phys_idx, 'pin_flatness_deviation_um'] = np.clip(df.loc[phys_idx, 'pin_flatness_deviation_um'] + rng.uniform(20, 35, len(phys_idx)), 0, 50)
+    df.loc[phys_idx, 'failure_status'] = 0
+    df.loc[phys_idx, 'failure_mode'] = 'physical_damage'
+
+    # 保存潜在风险分(便于审计/老化耦合, 非检测可见字段不写入 baseline csv)
+    df.attrs['risk'] = strongest
     return df
 
 
-def generate_aging_curves(baseline_df, output_dir):
-    """
-    为每个芯片生成老化过程中的参数漂移曲线
-    
-    模拟：老化过程中VDD、IDD、VOH、VOL、延迟等参数的时间变化
-    """
-    
+def generate_aging_curves(baseline_df, rng):
+    """老化漂移时间序列: 失效品漂移更大/更非线性, 且与初始风险耦合"""
     print("生成老化曲线...")
-    
-    aging_data_list = []
-    
-    for idx, row in baseline_df.iterrows():
-        chip_id = row['chip_id']
-        aging_duration = int(row['aging_duration_hours'])
-        is_failure = row['failure_status'] == 0
-        
-        # 生成时间点（分钟级采样，每小时一个点）
-        time_points = np.arange(0, aging_duration + 1, 1)  # 小时
-        
-        # 初始值
-        vdd_init = row['vdd_voltage']
-        idd_dynamic_init = row['idd_dynamic_ma']
-        voh_init = row['voh_voltage']
-        vol_init = row['vol_voltage']
-        propagation_delay_init = row['propagation_delay_ns']
-        
-        for t in time_points:
-            # 正常的参数漂移（线性或指数衰减）
-            if not is_failure:
-                # 轻微漂移（<5%）
-                vdd_drift = vdd_init * (1 + np.random.normal(0, 0.01))
-                idd_drift = idd_dynamic_init * (1 + np.random.normal(0, 0.02))
-                voh_drift = voh_init * (1 - 0.001 * t / aging_duration)  # 缓慢下降
-                vol_drift = vol_init * (1 + 0.001 * t / aging_duration)   # 缓慢上升
-                delay_drift = propagation_delay_init * (1 + 0.001 * t / aging_duration)  # 缓慢增加
-            
+    rows = []
+    risk = baseline_df.attrs.get('risk', np.zeros(len(baseline_df)))
+    risk_n = (risk - risk.min()) / (np.ptp(risk) + 1e-9)
+
+    for i, (_, row) in enumerate(baseline_df.iterrows()):
+        dur = int(row['aging_duration_hours'])
+        is_fail = row['failure_status'] == 0
+        rk = risk_n[i]
+        temp_acc = 1.0 + 0.5 * (row['aging_temperature_c'] - 85) / 40.0  # 125°C 漂移更快
+        for t in np.arange(0, dur + 1, 1):
+            frac = t / max(dur, 1)
+            if not is_fail:
+                k = 0.001 + 0.002 * rk
+                vdd_d = row['vdd_voltage'] * (1 + rng.normal(0, 0.008))
+                idd_d = row['idd_dynamic_ma'] * (1 + rng.normal(0, 0.015))
+                voh_d = row['voh_voltage'] * (1 - k * frac * temp_acc)
+                vol_d = row['vol_voltage'] * (1 + k * frac * temp_acc)
+                delay_d = row['propagation_delay_ns'] * (1 + k * frac * temp_acc)
             else:
-                # 故障品的参数漂移（较大，可能非线性）
+                accel = (1 + frac ** 1.5) * temp_acc
                 if row['failure_mode'] == 'thermal_accumulation':
-                    # 加速漂移，呈指数增长
-                    acceleration = 1 + (t / aging_duration) ** 1.5
-                    vdd_drift = vdd_init * (1 + np.random.normal(0, 0.02) * acceleration)
-                    idd_drift = idd_dynamic_init * (1 + np.random.normal(0, 0.05) * acceleration)
-                    voh_drift = voh_init * (1 - 0.005 * t / aging_duration * acceleration)
-                    vol_drift = vol_init * (1 + 0.005 * t / aging_duration * acceleration)
-                    delay_drift = propagation_delay_init * (1 + 0.005 * t / aging_duration * acceleration)
-                
+                    idd_d = row['idd_dynamic_ma'] * (1 + rng.normal(0.04, 0.02) * accel)
+                    voh_d = row['voh_voltage'] * (1 - 0.006 * frac * accel)
+                    vol_d = row['vol_voltage'] * (1 + 0.006 * frac * accel)
+                    delay_d = row['propagation_delay_ns'] * (1 + 0.005 * frac * accel)
+                    vdd_d = row['vdd_voltage'] * (1 + rng.normal(0, 0.02) * accel)
                 elif row['failure_mode'] == 'noise_margin_insufficient':
-                    # VOH、VOL恶化明显
-                    vdd_drift = vdd_init * (1 + np.random.normal(-0.02, 0.01))
-                    idd_drift = idd_dynamic_init * (1 + np.random.normal(0.03, 0.02))
-                    voh_drift = voh_init * (1 - 0.01 * t / aging_duration)  # 快速下降
-                    vol_drift = vol_init * (1 + 0.01 * t / aging_duration)   # 快速上升
-                    delay_drift = propagation_delay_init * (1 + 0.003 * t / aging_duration)
-                
+                    voh_d = row['voh_voltage'] * (1 - 0.011 * frac * accel)
+                    vol_d = row['vol_voltage'] * (1 + 0.011 * frac * accel)
+                    idd_d = row['idd_dynamic_ma'] * (1 + rng.normal(0.02, 0.02))
+                    delay_d = row['propagation_delay_ns'] * (1 + 0.003 * frac * accel)
+                    vdd_d = row['vdd_voltage'] * (1 + rng.normal(-0.01, 0.01))
                 else:
-                    # 其他故障模式
-                    vdd_drift = vdd_init * (1 + np.random.normal(-0.01, 0.02))
-                    idd_drift = idd_dynamic_init * (1 + np.random.normal(0.02, 0.03))
-                    voh_drift = voh_init * (1 - 0.003 * t / aging_duration)
-                    vol_drift = vol_init * (1 + 0.003 * t / aging_duration)
-                    delay_drift = propagation_delay_init * (1 + 0.002 * t / aging_duration)
-            
-            aging_data_list.append({
-                'chip_id': chip_id,
-                'aging_hour': t,
-                'vdd_voltage': vdd_drift,
-                'idd_dynamic_ma': idd_drift,
-                'voh_voltage': voh_drift,
-                'vol_voltage': vol_drift,
-                'propagation_delay_ns': delay_drift,
-            })
-    
-    aging_df = pd.DataFrame(aging_data_list)
-    return aging_df
+                    voh_d = row['voh_voltage'] * (1 - 0.004 * frac * accel)
+                    vol_d = row['vol_voltage'] * (1 + 0.004 * frac * accel)
+                    idd_d = row['idd_dynamic_ma'] * (1 + rng.normal(0.02, 0.03))
+                    delay_d = row['propagation_delay_ns'] * (1 + 0.004 * frac * accel)
+                    vdd_d = row['vdd_voltage'] * (1 + rng.normal(-0.01, 0.02))
+            rows.append({'chip_id': row['chip_id'], 'aging_hour': int(t),
+                         'vdd_voltage': vdd_d, 'idd_dynamic_ma': idd_d,
+                         'voh_voltage': voh_d, 'vol_voltage': vol_d,
+                         'propagation_delay_ns': delay_d})
+    return pd.DataFrame(rows)
 
 
-def generate_failure_annotations(baseline_df):
-    """
-    生成失效标注：芯片失效时间、现象、根本原因
-    """
-    
+def generate_failure_annotations(baseline_df, rng):
+    """失效标注: 时间/现象/根因"""
     print("生成失效标注...")
-    
-    failure_annotations = []
-    
-    for idx, row in baseline_df.iterrows():
-        if row['failure_status'] == 0:  # 只标注失效品
-            # 失效时间（在老化过程中的某个点失效）
-            failure_time = np.random.randint(10, int(row['aging_duration_hours']))
-            
-            # 失效现象描述
-            mode = row['failure_mode']
-            if mode == 'physical_damage':
-                phenomenon = 'Physical connection broken, device disconnected'
-            elif mode == 'noise_margin_insufficient':
-                phenomenon = 'Signal integrity failure, intermittent errors'
-            elif mode == 'thermal_accumulation':
-                phenomenon = 'Thermal runaway, power consumption surged, shutdown protection triggered'
-            elif mode == 'multi_param_combined':
-                phenomenon = 'Timing violation, failed functional tests at high frequency'
-            else:
-                phenomenon = 'Unknown'
-            
-            failure_annotations.append({
-                'chip_id': row['chip_id'],
-                'failure_mode': mode,
-                'failure_time_hours': failure_time,
-                'failure_phenomenon': phenomenon,
-                'root_cause': f'Parameter degradation due to {mode}',
-                'predicted_mttf_hours': failure_time * 2,  # 估计MTTF为失效时间的2倍
-            })
-    
-    failure_df = pd.DataFrame(failure_annotations)
-    return failure_df
+    phen = {
+        'physical_damage': 'Physical connection broken, device disconnected',
+        'noise_margin_insufficient': 'Signal integrity failure, intermittent errors',
+        'thermal_accumulation': 'Thermal runaway, power surged, shutdown protection triggered',
+        'multi_param_combined': 'Timing violation, functional test fails at high frequency',
+    }
+    rows = []
+    for _, row in baseline_df.iterrows():
+        if row['failure_status'] == 0:
+            ft = int(rng.integers(10, max(11, int(row['aging_duration_hours']))))
+            rows.append({'chip_id': row['chip_id'], 'failure_mode': row['failure_mode'],
+                         'failure_time_hours': ft,
+                         'failure_phenomenon': phen.get(row['failure_mode'], 'Unknown'),
+                         'root_cause': f"Parameter interaction / degradation: {row['failure_mode']}",
+                         'predicted_mttf_hours': ft * 2})
+    return pd.DataFrame(rows)
 
 
 def main():
-    """主函数"""
-    
     print("=" * 60)
-    print("芯片再制造可靠性评估 - 合成数据生成")
+    print("芯片再制造可靠性评估 - 合成数据生成 (v2 真实隐性故障)")
     print("=" * 60)
-    
-    output_dir = r'D:\laboratory_projects\solid_waste_projects_260526\synthetic_data'
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 1. 生成基础数据
-    baseline_df = generate_baseline_data(n_chips=1000)
-    print(f"✓ 生成了 {len(baseline_df)} 个芯片的基础参数")
-    
-    # 2. 添加故障模式
-    baseline_df = add_failure_patterns_to_baseline(baseline_df)
-    n_failures = (baseline_df['failure_status'] == 0).sum()
-    print(f"✓ 添加了故障模式，其中 {n_failures} 个故障品({100*n_failures/len(baseline_df):.1f}%)")
-    
-    # 3. 生成老化曲线
-    aging_df = generate_aging_curves(baseline_df, output_dir)
-    print(f"✓ 生成了 {len(aging_df)} 条老化曲线数据")
-    
-    # 4. 生成失效标注
-    failure_df = generate_failure_annotations(baseline_df)
-    print(f"✓ 生成了 {len(failure_df)} 条失效标注")
-    
-    # 保存数据
-    baseline_path = os.path.join(output_dir, 'chip_baseline_data.csv')
-    aging_path = os.path.join(output_dir, 'chip_aging_curves.csv')
-    failure_path = os.path.join(output_dir, 'chip_failure_labels.csv')
-    
-    baseline_df.to_csv(baseline_path, index=False, encoding='utf-8')
-    aging_df.to_csv(aging_path, index=False, encoding='utf-8')
-    failure_df.to_csv(failure_path, index=False, encoding='utf-8')
-    
-    print(f"\n✓ 数据已保存到: {output_dir}")
-    print(f"  - {baseline_path}")
-    print(f"  - {aging_path}")
-    print(f"  - {failure_path}")
-    
-    # 打印数据统计
-    print("\n" + "=" * 60)
-    print("数据统计")
-    print("=" * 60)
-    print(f"\n基础数据集规模:")
-    print(f"  - 总芯片数: {len(baseline_df)}")
-    print(f"  - 正常品: {(baseline_df['failure_status'] == 1).sum()}")
-    print(f"  - 故障品: {(baseline_df['failure_status'] == 0).sum()}")
-    print(f"\n故障模式分布:")
-    for mode in baseline_df[baseline_df['failure_status'] == 0]['failure_mode'].unique():
-        count = ((baseline_df['failure_status'] == 0) & (baseline_df['failure_mode'] == mode)).sum()
-        print(f"  - {mode}: {count}")
-    
-    print(f"\n基础参数样本 (前5行):")
-    print(baseline_df.iloc[:5, :10].to_string())
-    
-    print(f"\n老化曲线样本 (某芯片的10小时数据):")
-    sample_chip = baseline_df.iloc[0]['chip_id']
-    sample_aging = aging_df[aging_df['chip_id'] == sample_chip].head(10)
-    print(sample_aging.to_string())
-    
-    print(f"\n失效标注样本:")
-    if len(failure_df) > 0:
-        print(failure_df.head().to_string())
-    else:
-        print("  (本次生成没有失效品)")
-    
+
+    rng = np.random.default_rng(SEED)
+    repo_root = Path(__file__).resolve().parents[2]
+    output_dir = repo_root / 'synthetic_data'
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    baseline_df, _ = generate_baseline_data(1000, rng)
+    print(f"✓ 基础参数: {len(baseline_df)} 芯片")
+
+    baseline_df = assign_interaction_failures(baseline_df, rng)
+    nfail = int((baseline_df['failure_status'] == 0).sum())
+    print(f"✓ 失效注入: {nfail} 个失效品 ({100*nfail/len(baseline_df):.1f}%)")
+
+    aging_df = generate_aging_curves(baseline_df, rng)
+    print(f"✓ 老化曲线: {len(aging_df)} 行")
+
+    failure_df = generate_failure_annotations(baseline_df, rng)
+    print(f"✓ 失效标注: {len(failure_df)} 条")
+
+    baseline_df.to_csv(output_dir / 'chip_baseline_data.csv', index=False, encoding='utf-8')
+    aging_df.to_csv(output_dir / 'chip_aging_curves.csv', index=False, encoding='utf-8')
+    failure_df.to_csv(output_dir / 'chip_failure_labels.csv', index=False, encoding='utf-8')
+
+    print(f"\n✓ 已保存到: {output_dir}")
+    print("\n故障模式分布:")
+    print(baseline_df[baseline_df.failure_status == 0]['failure_mode'].value_counts().to_string())
     print("\n" + "=" * 60)
     print("数据生成完成！")
     print("=" * 60)
