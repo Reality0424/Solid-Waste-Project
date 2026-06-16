@@ -1,39 +1,51 @@
 {
+  "OF_MODEL": {
+    "from": "Chip",
+    "to": "ChipModel",
+    "description": "芯片型号"
+  },
   "UNDERGOES_TEST": {
     "from": "Chip",
     "to": "TestStage",
-    "description": "芯片进行测试",
-    "properties": [
-      "test_date",
-      "result"
-    ]
+    "description": "芯片经历测试阶段"
   },
-  "MEASURES": {
-    "from": "TestStage",
-    "to": "Parameter",
-    "description": "测试阶段测量参数",
-    "properties": [
-      "measured_value",
-      "unit",
-      "tolerance"
-    ]
+  "EXHIBITS": {
+    "from": "Chip",
+    "to": "FailureMode",
+    "description": "芯片呈现的状态/失效模式"
   },
-  "DEPENDS_ON": {
-    "from": "TestStage",
-    "to": "TestStage",
-    "description": "测试阶段依赖关系",
-    "properties": [
-      "sequence",
-      "condition"
-    ]
-  },
-  "HAS_METRIC": {
+  "HAS_ABNORMAL": {
     "from": "Chip",
     "to": "Parameter",
-    "description": "芯片具有参数",
+    "description": "芯片在指标上异常",
     "properties": [
-      "value",
-      "timestamp"
+      "z_score"
+    ]
+  },
+  "BELONGS_TO": {
+    "from": "Parameter",
+    "to": "Dimension",
+    "description": "指标归属维度"
+  },
+  "MEASURED_IN": {
+    "from": "Parameter",
+    "to": "TestStage",
+    "description": "指标测量阶段"
+  },
+  "PRECEDES": {
+    "from": "TestStage",
+    "to": "TestStage",
+    "description": "测试阶段顺序",
+    "properties": [
+      "sequence"
+    ]
+  },
+  "CORRELATES_WITH": {
+    "from": "Parameter",
+    "to": "Parameter",
+    "description": "指标间相关性",
+    "properties": [
+      "weight"
     ]
   }
 }

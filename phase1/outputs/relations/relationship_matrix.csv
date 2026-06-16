@@ -1,0 +1,9 @@
+relation,from_type,to_type,count
+UNDERGOES_TEST,Chip,TestStage,5000
+HAS_ABNORMAL,Chip,Parameter,1014
+EXHIBITS,Chip,FailureMode,1000
+OF_MODEL,Chip,ChipModel,1000
+BELONGS_TO,Parameter,Dimension,25
+MEASURED_IN,Parameter,TestStage,25
+CORRELATES_WITH,Parameter,Parameter,4
+PRECEDES,TestStage,TestStage,4

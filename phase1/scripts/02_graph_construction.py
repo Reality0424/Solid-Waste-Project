@@ -2,380 +2,403 @@
 # -*- coding: utf-8 -*-
 """
 Phase 1: 知识图谱构建脚本
-功能: 从清洗数据构建知识图谱，导入Neo4j
+功能: 从清洗数据构建多维关系知识图谱，导入 Neo4j，并导出图谱产物。
+
+实体类型:
+  Chip(芯片) / Parameter(指标) / Dimension(维度) / TestStage(测试阶段)
+  / FailureMode(失效模式) / ChipModel(型号)
+
+关系类型（多维）:
+  OF_MODEL        Chip       -> ChipModel       芯片型号
+  UNDERGOES_TEST  Chip       -> TestStage       芯片经历测试阶段
+  EXHIBITS        Chip       -> FailureMode     芯片呈现的（失效/正常）状态
+  HAS_ABNORMAL    Chip       -> Parameter       芯片在某指标上异常 (|z|>2)
+  BELONGS_TO      Parameter  -> Dimension       指标归属维度
+  MEASURED_IN     Parameter  -> TestStage       指标在某阶段被测量
+  PRECEDES        TestStage  -> TestStage       测试阶段先后顺序
+  CORRELATES_WITH Parameter  -> Parameter       指标间相关性 (|pearson|>=阈值, 基础关联挖掘)
+
+产物:
+  outputs/graph/entity_definitions.json     实体定义
+  outputs/graph/relationship_types.json     关系类型定义
+  outputs/graph/knowledge_graph.pkl         序列化图谱 (networkx.DiGraph)
+  outputs/graph/neo4j_import_script.cypher  Cypher 导入脚本（备份/复现用）
+  outputs/relations/entity_relations.csv    全部三元组 (head, relation, tail)
+  outputs/relations/relationship_matrix.csv 关系类型 × (头类型,尾类型) 计数矩阵
 """
 
 import pandas as pd
+import numpy as np
 import json
 import yaml
 import argparse
+import pickle
 from pathlib import Path
-from neo4j import GraphDatabase
 import logging
 
+import networkx as nx
+
 # 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ---- 领域知识：维度 / 阶段 / 指标映射 -----------------------------------------
+DIMENSIONS = {
+    'Physical':      {'stage': 'Appearance',
+                      'params': ['pin_flatness_deviation_um', 'solder_pad_oxidation_percent',
+                                 'package_scratch_depth_um', 'warpage_um',
+                                 'pin_coplanarity_percent', 'package_size_deviation_percent']},
+    'Electrical_DC': {'stage': 'DC_Electrical',
+                      'params': ['vdd_voltage', 'idd_static_ma', 'idd_dynamic_ma', 'voh_voltage',
+                                 'vol_voltage', 'vih_voltage', 'vil_voltage',
+                                 'iil_leakage_ua', 'iol_leakage_ua']},
+    'Electrical_AC': {'stage': 'AC_Electrical',
+                      'params': ['setup_time_ns', 'hold_time_ns', 'propagation_delay_ns',
+                                 'rise_time_ns', 'fall_time_ns', 'fmax_mhz']},
+    'Reliability':   {'stage': 'Aging',
+                      'params': ['aging_temperature_c', 'aging_voltage_v',
+                                 'aging_frequency_mhz', 'aging_duration_hours']},
+}
+TEST_SEQUENCE = ['Appearance', 'DC_Electrical', 'AC_Electrical', 'Functional', 'Aging']
+STAGE_DESC = {
+    'Appearance': '外观/物理检测', 'DC_Electrical': 'DC电气测试', 'AC_Electrical': 'AC电气/时序测试',
+    'Functional': '功能测试', 'Aging': '老化/可靠性测试',
+}
+
+# 节点 key 约定（全图唯一，便于 TransE 统一抽取三元组）
+def k_chip(cid):  return str(cid)
+def k_param(p):   return f"PARAM::{p}"
+def k_dim(d):     return f"DIM::{d}"
+def k_stage(s):   return f"TS::{s}"
+def k_fail(m):    return f"FM::{m}"
+def k_model(m):   return f"MODEL::{m}"
 
 
 class GraphBuilder:
-    def __init__(self, neo4j_uri, neo4j_user, neo4j_password, database='neo4j'):
+    def __init__(self, neo4j_uri, neo4j_user, neo4j_password, database='neo4j',
+                 corr_threshold=0.5, abnormal_z=2.0):
         self.neo4j_uri = neo4j_uri
         self.neo4j_user = neo4j_user
         self.neo4j_password = neo4j_password
         self.database = database
+        self.corr_threshold = corr_threshold
+        self.abnormal_z = abnormal_z
         self.driver = None
-        self.entities = {}
-        self.relationships = {}
-        
+
+        # nodes: key -> {'label':..., 'props':{...}}
+        self.nodes = {}
+        # edges: list of (head_key, rel_type, tail_key, props)
+        self.edges = []
+        self.entity_defs = {}
+        self.rel_defs = {}
+
+    # ---- Neo4j ---------------------------------------------------------------
     def connect(self):
-        """连接到Neo4j"""
+        from neo4j import GraphDatabase
         try:
             self.driver = GraphDatabase.driver(
-                self.neo4j_uri,
-                auth=(self.neo4j_user, self.neo4j_password),
-                encrypted=False
-            )
-            with self.driver.session(database=self.database) as session:
-                session.run("RETURN 1 as ping")
-            logger.info(f"✅ 连接到Neo4j成功: {self.neo4j_uri}")
+                self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password), encrypted=False)
+            with self.driver.session(database=self.database) as s:
+                s.run("RETURN 1").single()
+            logger.info(f"✅ 连接 Neo4j 成功: {self.neo4j_uri}")
             return True
         except Exception as e:
-            logger.error(f"❌ Neo4j连接失败: {e}")
+            logger.error(f"❌ Neo4j 连接失败: {e}")
             return False
-    
-    def define_entities(self, cleaned_data):
-        """从数据定义实体"""
+
+    # ---- 实体 ---------------------------------------------------------------
+    def _add_node(self, key, label, **props):
+        self.nodes[key] = {'label': label, 'props': {'key': key, **props}}
+
+    def define_entities(self, df):
         logger.info("定义实体...")
-        
-        # 芯片实体
-        chip_ids = cleaned_data['chip_id'].unique()
-        self.entities['Chip'] = {
-            'ids': list(chip_ids),
-            'count': len(chip_ids),
-            'attributes': ['id', 'model', 'batch_id', 'manufacturing_date']
+        avail_params = []
+
+        # ChipModel
+        models = sorted(df['chip_model'].dropna().unique()) if 'chip_model' in df else []
+        for m in models:
+            self._add_node(k_model(m), 'ChipModel', name=str(m))
+
+        # FailureMode
+        modes = sorted(df['failure_mode'].dropna().unique()) if 'failure_mode' in df else ['normal']
+        for m in modes:
+            self._add_node(k_fail(m), 'FailureMode', name=str(m))
+
+        # Dimension + TestStage + Parameter
+        for stage in TEST_SEQUENCE:
+            self._add_node(k_stage(stage), 'TestStage', name=stage, description=STAGE_DESC.get(stage, ''))
+        for dim, spec in DIMENSIONS.items():
+            self._add_node(k_dim(dim), 'Dimension', name=dim, test_stage=spec['stage'])
+            for p in spec['params']:
+                if p in df.columns:
+                    self._add_node(k_param(p), 'Parameter', name=p, dimension=dim,
+                                   test_stage=spec['stage'], data_type='numeric')
+                    avail_params.append(p)
+
+        # Chip
+        for _, row in df.iterrows():
+            props = {'model': str(row.get('chip_model', 'Unknown')),
+                     'failure_mode': str(row.get('failure_mode', 'normal')),
+                     'failure_status': int(row.get('failure_status', 0))}
+            self._add_node(k_chip(row['chip_id']), 'Chip', **props)
+
+        # 统计 entity_definitions
+        from collections import Counter
+        label_counts = Counter(n['label'] for n in self.nodes.values())
+        attr_map = {
+            'Chip': ['key', 'model', 'failure_mode', 'failure_status', 'embedding'],
+            'Parameter': ['key', 'name', 'dimension', 'test_stage', 'data_type'],
+            'Dimension': ['key', 'name', 'test_stage'],
+            'TestStage': ['key', 'name', 'description'],
+            'FailureMode': ['key', 'name'],
+            'ChipModel': ['key', 'name'],
         }
-        
-        # 测试阶段实体
-        test_stages = [
-            {'name': 'Appearance', 'stage_id': 'TS_001', 'description': '外观检测'},
-            {'name': 'DC_Electrical', 'stage_id': 'TS_002', 'description': 'DC电气测试'},
-            {'name': 'AC_Electrical', 'stage_id': 'TS_003', 'description': 'AC电气测试'},
-            {'name': 'Functional', 'stage_id': 'TS_004', 'description': '功能测试'},
-            {'name': 'Aging', 'stage_id': 'TS_005', 'description': '老化测试'}
-        ]
-        self.entities['TestStage'] = {
-            'data': test_stages,
-            'count': len(test_stages),
-            'attributes': ['stage_id', 'stage_name', 'description']
+        for label, cnt in label_counts.items():
+            self.entity_defs[label] = {'count': int(cnt), 'attributes': attr_map.get(label, [])}
+
+        logger.info(f"   实体总数: {len(self.nodes)}")
+        for label, cnt in label_counts.items():
+            logger.info(f"   - {label}: {cnt}")
+        return avail_params
+
+    # ---- 关系 ---------------------------------------------------------------
+    def define_relationships(self, df, avail_params):
+        logger.info("构建关系...")
+
+        # 结构关系: Parameter -> Dimension / TestStage
+        for dim, spec in DIMENSIONS.items():
+            for p in spec['params']:
+                if p in avail_params:
+                    self.edges.append((k_param(p), 'BELONGS_TO', k_dim(dim), {}))
+                    self.edges.append((k_param(p), 'MEASURED_IN', k_stage(spec['stage']), {}))
+
+        # TestStage -> TestStage 顺序
+        for i in range(len(TEST_SEQUENCE) - 1):
+            self.edges.append((k_stage(TEST_SEQUENCE[i]), 'PRECEDES',
+                               k_stage(TEST_SEQUENCE[i + 1]), {'sequence': i + 1}))
+
+        # Chip -> ChipModel / FailureMode / TestStage
+        for _, row in df.iterrows():
+            cid = k_chip(row['chip_id'])
+            if 'chip_model' in df:
+                self.edges.append((cid, 'OF_MODEL', k_model(row['chip_model']), {}))
+            mode = str(row.get('failure_mode', 'normal'))
+            self.edges.append((cid, 'EXHIBITS', k_fail(mode), {}))
+            for stage in TEST_SEQUENCE:
+                self.edges.append((cid, 'UNDERGOES_TEST', k_stage(stage), {}))
+
+        # Chip -> Parameter (HAS_ABNORMAL): |z| > 阈值
+        abnormal_count = 0
+        for p in avail_params:
+            vals = df[p].astype(float)
+            mu, sigma = vals.mean(), vals.std()
+            if sigma > 0:
+                z = (vals - mu) / sigma
+                mask = z.abs() > self.abnormal_z
+                for cid, zv in zip(df.loc[mask, 'chip_id'], z[mask]):
+                    self.edges.append((k_chip(cid), 'HAS_ABNORMAL', k_param(p),
+                                       {'z_score': round(float(zv), 3)}))
+                    abnormal_count += 1
+        logger.info(f"   HAS_ABNORMAL 边: {abnormal_count}")
+
+        # Parameter <-> Parameter (CORRELATES_WITH): 基础关联挖掘
+        corr_count = 0
+        if len(avail_params) >= 2:
+            corr = df[avail_params].astype(float).corr(method='pearson')
+            for i in range(len(avail_params)):
+                for j in range(i + 1, len(avail_params)):
+                    r = corr.iloc[i, j]
+                    if pd.notna(r) and abs(r) >= self.corr_threshold:
+                        self.edges.append((k_param(avail_params[i]), 'CORRELATES_WITH',
+                                           k_param(avail_params[j]), {'weight': round(float(r), 4)}))
+                        corr_count += 1
+        logger.info(f"   CORRELATES_WITH 边: {corr_count}")
+
+        # rel_defs
+        self.rel_defs = {
+            'OF_MODEL':        {'from': 'Chip', 'to': 'ChipModel', 'description': '芯片型号'},
+            'UNDERGOES_TEST':  {'from': 'Chip', 'to': 'TestStage', 'description': '芯片经历测试阶段'},
+            'EXHIBITS':        {'from': 'Chip', 'to': 'FailureMode', 'description': '芯片呈现的状态/失效模式'},
+            'HAS_ABNORMAL':    {'from': 'Chip', 'to': 'Parameter', 'description': '芯片在指标上异常', 'properties': ['z_score']},
+            'BELONGS_TO':      {'from': 'Parameter', 'to': 'Dimension', 'description': '指标归属维度'},
+            'MEASURED_IN':     {'from': 'Parameter', 'to': 'TestStage', 'description': '指标测量阶段'},
+            'PRECEDES':        {'from': 'TestStage', 'to': 'TestStage', 'description': '测试阶段顺序', 'properties': ['sequence']},
+            'CORRELATES_WITH': {'from': 'Parameter', 'to': 'Parameter', 'description': '指标间相关性', 'properties': ['weight']},
         }
-        
-        # 参数实体
-        numeric_cols = cleaned_data.select_dtypes(include=['number']).columns
-        parameters = []
-        for i, col in enumerate(numeric_cols):
-            parameters.append({
-                'param_id': f'PM_{i:03d}',
-                'param_name': col,
-                'data_type': 'numeric'
-            })
-        self.entities['Parameter'] = {
-            'data': parameters,
-            'count': len(parameters),
-            'attributes': ['param_id', 'param_name', 'data_type']
-        }
-        
-        logger.info(f"   定义实体:")
-        for entity_type, entity_info in self.entities.items():
-            count = entity_info.get('count', 0)
-            logger.info(f"   - {entity_type}: {count}")
-        
-        return True
-    
-    def define_relationships(self):
-        """定义关系类型"""
-        logger.info("定义关系类型...")
-        
-        self.relationships = {
-            'UNDERGOES_TEST': {
-                'from': 'Chip',
-                'to': 'TestStage',
-                'description': '芯片进行测试',
-                'properties': ['test_date', 'result']
-            },
-            'MEASURES': {
-                'from': 'TestStage',
-                'to': 'Parameter',
-                'description': '测试阶段测量参数',
-                'properties': ['measured_value', 'unit', 'tolerance']
-            },
-            'DEPENDS_ON': {
-                'from': 'TestStage',
-                'to': 'TestStage',
-                'description': '测试阶段依赖关系',
-                'properties': ['sequence', 'condition']
-            },
-            'HAS_METRIC': {
-                'from': 'Chip',
-                'to': 'Parameter',
-                'description': '芯片具有参数',
-                'properties': ['value', 'timestamp']
-            }
-        }
-        
-        logger.info(f"   定义关系类型: {len(self.relationships)}")
-        for rel_type in self.relationships.keys():
-            logger.info(f"   - {rel_type}")
-        
-        return True
-    
-    def save_entity_definitions(self, output_path):
-        """保存实体定义"""
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        entity_defs = {}
-        for entity_type, entity_info in self.entities.items():
-            entity_defs[entity_type] = {
-                'count': entity_info.get('count', 0),
-                'attributes': entity_info.get('attributes', [])
-            }
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(entity_defs, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"✅ 实体定义已保存: {output_path}")
-    
-    def save_relationship_types(self, output_path):
-        """保存关系类型定义"""
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        rel_defs = {}
-        for rel_type, rel_info in self.relationships.items():
-            rel_defs[rel_type] = {
-                'from': rel_info['from'],
-                'to': rel_info['to'],
-                'description': rel_info['description'],
-                'properties': rel_info['properties']
-            }
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(rel_defs, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"✅ 关系类型已保存: {output_path}")
-    
-    def create_nodes_in_neo4j(self, cleaned_data):
-        """在Neo4j中创建节点"""
-        logger.info("创建Neo4j节点...")
-        
-        try:
-            with self.driver.session(database=self.database) as session:
-                # 创建芯片节点
-                logger.info("  创建Chip节点...")
-                chip_count = 0
-                for chip_id in self.entities['Chip']['ids']:
-                    session.run(
-                        "CREATE (c:Chip {id: $chip_id}) RETURN c",
-                        chip_id=str(chip_id)
-                    )
-                    chip_count += 1
-                logger.info(f"    ✓ {chip_count} 个Chip节点已创建")
-                
-                # 创建测试阶段节点
-                logger.info("  创建TestStage节点...")
-                for ts in self.entities['TestStage']['data']:
-                    session.run(
-                        "CREATE (t:TestStage {stage_id: $stage_id, stage_name: $stage_name, "
-                        "description: $desc}) RETURN t",
-                        stage_id=ts['stage_id'],
-                        stage_name=ts['name'],
-                        desc=ts['description']
-                    )
-                logger.info(f"    ✓ {len(self.entities['TestStage']['data'])} 个TestStage节点已创建")
-                
-                # 创建参数节点
-                logger.info("  创建Parameter节点...")
-                param_count = 0
-                for param in self.entities['Parameter']['data']:
-                    session.run(
-                        "CREATE (p:Parameter {param_id: $param_id, name: $name, "
-                        "data_type: $dtype}) RETURN p",
-                        param_id=param['param_id'],
-                        name=param['param_name'],
-                        dtype=param['data_type']
-                    )
-                    param_count += 1
-                logger.info(f"    ✓ {param_count} 个Parameter节点已创建")
-            
-            return True
-        except Exception as e:
-            logger.error(f"❌ 创建节点时出错: {e}")
-            return False
-    
-    def create_relationships_in_neo4j(self):
-        """在Neo4j中创建关系"""
-        logger.info("创建Neo4j关系...")
-        
-        try:
-            with self.driver.session(database=self.database) as session:
-                # UNDERGOES_TEST: Chip -> TestStage
-                logger.info("  创建 UNDERGOES_TEST 关系...")
-                session.run("""
-                    MATCH (c:Chip), (t:TestStage)
-                    WITH c, t
-                    CREATE (c)-[r:UNDERGOES_TEST]->(t)
-                    RETURN count(r) as count
-                """)
-                
-                # MEASURES: TestStage -> Parameter
-                logger.info("  创建 MEASURES 关系...")
-                session.run("""
-                    MATCH (t:TestStage), (p:Parameter)
-                    WITH t, p
-                    CREATE (t)-[r:MEASURES]->(p)
-                    RETURN count(r) as count
-                """)
-                
-                # DEPENDS_ON: TestStage -> TestStage（测试阶段顺序依赖）
-                logger.info("  创建 DEPENDS_ON 关系...")
-                session.run("""
-                    MATCH (t1:TestStage), (t2:TestStage)
-                    WHERE t1.stage_id < t2.stage_id
-                    WITH t1, t2
-                    CREATE (t1)-[r:DEPENDS_ON]->(t2)
-                    RETURN count(r) as count
-                """)
-                
-                logger.info("    ✓ 关系创建完成")
-            
-            return True
-        except Exception as e:
-            logger.error(f"❌ 创建关系时出错: {e}")
-            return False
-    
+        from collections import Counter
+        rel_counts = Counter(e[1] for e in self.edges)
+        logger.info(f"   关系总数: {len(self.edges)}")
+        for rt, c in rel_counts.items():
+            logger.info(f"   - {rt}: {c}")
+
+    # ---- 写入 Neo4j ----------------------------------------------------------
+    def write_to_neo4j(self, clear=True):
+        logger.info("写入 Neo4j...")
+        with self.driver.session(database=self.database) as s:
+            if clear:
+                s.run("MATCH (n) DETACH DELETE n")
+            # 每个 label 一个 key 唯一约束
+            for label in self.entity_defs:
+                s.run(f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.key IS UNIQUE")
+
+            # 批量建点
+            by_label = {}
+            for key, node in self.nodes.items():
+                by_label.setdefault(node['label'], []).append(node['props'])
+            for label, rows in by_label.items():
+                for i in range(0, len(rows), 1000):
+                    s.run(f"UNWIND $rows AS r CREATE (n:{label}) SET n = r",
+                          rows=rows[i:i + 1000])
+            logger.info(f"   ✓ 节点已写入: {len(self.nodes)}")
+
+            # 批量建边（按关系类型分组）
+            by_rel = {}
+            for h, rt, t, props in self.edges:
+                by_rel.setdefault(rt, []).append({'h': h, 't': t, 'props': props})
+            for rt, rows in by_rel.items():
+                for i in range(0, len(rows), 2000):
+                    s.run(
+                        "UNWIND $rows AS row "
+                        "MATCH (h {key: row.h}) MATCH (t {key: row.t}) "
+                        f"CREATE (h)-[rel:{rt}]->(t) SET rel = row.props",
+                        rows=rows[i:i + 2000])
+            logger.info(f"   ✓ 关系已写入: {len(self.edges)}")
+
     def get_graph_statistics(self):
-        """获取知识图谱统计"""
-        logger.info("获取图谱统计...")
-        
-        try:
-            with self.driver.session(database=self.database) as session:
-                node_count = session.run("MATCH (n) RETURN count(n) as count").single()['count']
-                rel_count = session.run("MATCH ()-[r]->() RETURN count(r) as count").single()['count']
-                
-                logger.info(f"📊 图谱统计:")
-                logger.info(f"   - 节点数: {node_count}")
-                logger.info(f"   - 关系数: {rel_count}")
-                
-                return {'nodes': node_count, 'relationships': rel_count}
-        except Exception as e:
-            logger.error(f"获取统计失败: {e}")
-            return None
-    
-    def build(self, cleaned_data_path, output_path, relations_output_path):
-        """执行完整的图谱构建流程"""
+        with self.driver.session(database=self.database) as s:
+            n = s.run("MATCH (n) RETURN count(n) AS c").single()['c']
+            r = s.run("MATCH ()-[x]->() RETURN count(x) AS c").single()['c']
+        logger.info(f"📊 Neo4j 图谱统计: 节点 {n}, 关系 {r}")
+        return {'nodes': n, 'relationships': r}
+
+    # ---- 产物导出 ------------------------------------------------------------
+    def export_artifacts(self, graph_dir, relations_dir):
+        graph_dir = Path(graph_dir); graph_dir.mkdir(parents=True, exist_ok=True)
+        relations_dir = Path(relations_dir); relations_dir.mkdir(parents=True, exist_ok=True)
+
+        # entity_definitions.json / relationship_types.json
+        with open(graph_dir / 'entity_definitions.json', 'w', encoding='utf-8') as f:
+            json.dump(self.entity_defs, f, ensure_ascii=False, indent=2)
+        with open(graph_dir / 'relationship_types.json', 'w', encoding='utf-8') as f:
+            json.dump(self.rel_defs, f, ensure_ascii=False, indent=2)
+
+        # entity_relations.csv (所有三元组)
+        triples = pd.DataFrame([(h, rt, t) for h, rt, t, _ in self.edges],
+                               columns=['head', 'relation', 'tail'])
+        triples.to_csv(relations_dir / 'entity_relations.csv', index=False)
+
+        # relationship_matrix.csv: 关系类型 × (头类型, 尾类型) 计数
+        label_of = {key: n['label'] for key, n in self.nodes.items()}
+        rows = []
+        for h, rt, t, _ in self.edges:
+            rows.append((rt, label_of.get(h, '?'), label_of.get(t, '?')))
+        mat = pd.DataFrame(rows, columns=['relation', 'from_type', 'to_type'])
+        mat = mat.value_counts().reset_index(name='count')
+        mat.to_csv(relations_dir / 'relationship_matrix.csv', index=False)
+
+        # knowledge_graph.pkl (networkx)
+        G = nx.DiGraph()
+        for key, node in self.nodes.items():
+            G.add_node(key, **node['props'], label=node['label'])
+        for h, rt, t, props in self.edges:
+            G.add_edge(h, t, relation=rt, **props)
+        with open(graph_dir / 'knowledge_graph.pkl', 'wb') as f:
+            pickle.dump(G, f)
+
+        # neo4j_import_script.cypher (复现用，紧凑版)
+        self._write_cypher(graph_dir / 'neo4j_import_script.cypher')
+
+        logger.info(f"✅ 产物已导出:")
+        logger.info(f"   - {graph_dir / 'entity_definitions.json'}")
+        logger.info(f"   - {graph_dir / 'relationship_types.json'}")
+        logger.info(f"   - {graph_dir / 'knowledge_graph.pkl'}")
+        logger.info(f"   - {graph_dir / 'neo4j_import_script.cypher'}")
+        logger.info(f"   - {relations_dir / 'entity_relations.csv'}")
+        logger.info(f"   - {relations_dir / 'relationship_matrix.csv'}")
+
+    def _write_cypher(self, path):
+        lines = ["// Phase 1 知识图谱 Cypher 导入脚本（自动生成）",
+                 "MATCH (n) DETACH DELETE n;"]
+        for label in self.entity_defs:
+            lines.append(f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:{label}) REQUIRE n.key IS UNIQUE;")
+        # 节点（仅写 key + name 以保持脚本紧凑；完整属性以 pkl/CSV 为准）
+        for key, node in self.nodes.items():
+            name = str(node['props'].get('name', node['props'].get('key', ''))).replace("'", "\\'")
+            lines.append(f"CREATE (:{node['label']} {{key:'{key}', name:'{name}'}});")
+        for h, rt, t, _ in self.edges:
+            lines.append(f"MATCH (h {{key:'{h}'}}),(t {{key:'{t}'}}) CREATE (h)-[:{rt}]->(t);")
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+
+    # ---- 主流程 --------------------------------------------------------------
+    def build(self, cleaned_data_path, graph_dir, relations_dir, use_neo4j=True):
         logger.info("=" * 60)
         logger.info("Phase 1: 知识图谱构建")
         logger.info("=" * 60)
-        
-        # 加载数据
         try:
-            cleaned_data = pd.read_csv(cleaned_data_path)
-            logger.info(f"✅ 数据加载成功: {len(cleaned_data)} 行")
+            df = pd.read_csv(cleaned_data_path)
+            logger.info(f"✅ 数据加载: {len(df)} 行, {len(df.columns)} 列")
         except Exception as e:
             logger.error(f"❌ 数据加载失败: {e}")
             return False
-        
-        # 连接Neo4j
-        if not self.connect():
-            return False
-        
-        # 定义实体和关系
-        self.define_entities(cleaned_data)
-        self.define_relationships()
-        
-        # 保存定义
-        output_path = Path(output_path)
-        output_path.mkdir(parents=True, exist_ok=True)
-        
-        self.save_entity_definitions(output_path / 'entity_definitions.json')
-        self.save_relationship_types(output_path / 'relationship_types.json')
-        
-        # 创建节点和关系
-        self.create_nodes_in_neo4j(cleaned_data)
-        self.create_relationships_in_neo4j()
-        
-        # 获取统计
-        stats = self.get_graph_statistics()
-        
-        self.driver.close()
-        
+
+        avail_params = self.define_entities(df)
+        self.define_relationships(df, avail_params)
+
+        if use_neo4j:
+            if not self.connect():
+                return False
+            self.write_to_neo4j(clear=True)
+            self.get_graph_statistics()
+            self.driver.close()
+        else:
+            logger.warning("⚠️ 跳过 Neo4j 写入 (--no-neo4j)")
+
+        self.export_artifacts(graph_dir, relations_dir)
+
         logger.info("=" * 60)
-        logger.info("✅ 知识图谱构建完成！")
+        logger.info(f"✅ 知识图谱构建完成！实体 {len(self.nodes)}, 关系 {len(self.edges)}")
         logger.info("=" * 60)
-        
         return True
 
 
 def load_config(config_path):
-    """加载配置文件"""
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        return config
-    except Exception as e:
-        logger.error(f"❌ 加载配置文件失败: {e}")
-        return None
+    with open(config_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+
+def _resolve(p, base, up=False):
+    p = Path(p)
+    if p.is_absolute():
+        return p
+    return (base / '..' / p) if up else (base / p)
 
 
 def main():
     parser = argparse.ArgumentParser(description='Phase 1 知识图谱构建脚本')
-    parser.add_argument('--config', type=str, default='../../config/neo4j.yaml',
-                       help='Neo4j配置文件')
-    parser.add_argument('--input_path', type=str, default='outputs/data/cleaned_data.csv',
-                       help='清洗数据路径')
-    parser.add_argument('--output_path', type=str, default='outputs/graph/',
-                       help='输出路径（图定义）')
-    parser.add_argument('--relations_output', type=str, default='outputs/relations/',
-                       help='输出路径（关系数据）')
-    
+    parser.add_argument('--config', type=str, default='../../config/neo4j.yaml')
+    parser.add_argument('--input_path', type=str, default='outputs/data/cleaned_data.csv')
+    parser.add_argument('--output_path', type=str, default='outputs/graph/')
+    parser.add_argument('--relations_output', type=str, default='outputs/relations/')
+    parser.add_argument('--corr_threshold', type=float, default=0.5)
+    parser.add_argument('--abnormal_z', type=float, default=2.0)
+    parser.add_argument('--no-neo4j', dest='use_neo4j', action='store_false',
+                        help='只导出产物，不写 Neo4j')
     args = parser.parse_args()
-    
-    # 加载配置
-    config_path = Path(args.config)
-    if not config_path.is_absolute():
-        config_path = Path(__file__).parent.parent / args.config
-    
-    config = load_config(config_path)
-    if not config:
-        return
-    
-    neo4j_config = config['neo4j']
-    
-    # 转换路径
+
     script_dir = Path(__file__).parent
-    if not Path(args.input_path).is_absolute():
-        input_path = script_dir / '..' / args.input_path
-    else:
-        input_path = Path(args.input_path)
-    
-    if not Path(args.output_path).is_absolute():
-        output_path = script_dir / '..' / args.output_path
-    else:
-        output_path = Path(args.output_path)
-    
-    # 构建图谱
+    config_path = _resolve(args.config, script_dir)  # '../../config/neo4j.yaml' -> Solid-Waste-Project/config
+    neo4j_config = load_config(config_path)['neo4j']
+
+    input_path = _resolve(args.input_path, script_dir, up=True)
+    graph_dir = _resolve(args.output_path, script_dir, up=True)
+    relations_dir = _resolve(args.relations_output, script_dir, up=True)
+
     builder = GraphBuilder(
-        neo4j_config['uri'],
-        neo4j_config['username'],
-        neo4j_config['password'],
-        neo4j_config.get('database', 'neo4j')
-    )
-    
-    builder.build(str(input_path), str(output_path), args.relations_output)
+        neo4j_config['uri'], neo4j_config['username'], neo4j_config['password'],
+        neo4j_config.get('database', 'neo4j'),
+        corr_threshold=args.corr_threshold, abnormal_z=args.abnormal_z)
+    builder.build(str(input_path), str(graph_dir), str(relations_dir), use_neo4j=args.use_neo4j)
 
 
 if __name__ == '__main__':

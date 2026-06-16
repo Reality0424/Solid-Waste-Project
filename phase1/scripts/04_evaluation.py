@@ -2,23 +2,27 @@
 # -*- coding: utf-8 -*-
 """
 Phase 1: 评估脚本
-功能: 评估TransE模型质量、验证知识图谱完整性、生成评估报告
+功能:
+  1) 知识图谱完整性 / 架构验证（来自 Neo4j）
+  2) TransE 链路预测质量 MRR / Hits@K（来自模型，使用训练时留出的测试三元组）
+  3) 收敛性检查
+  4) 生成 evaluation_report.md 与 transe_validation_report.md
 """
 
 import yaml
 import argparse
 import pickle
 from pathlib import Path
-from neo4j import GraphDatabase
 import logging
 from datetime import datetime
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+import numpy as np
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+EXPECTED_LABELS = ['Chip', 'Parameter', 'Dimension', 'TestStage', 'FailureMode', 'ChipModel']
+EPS = 1e-8
 
 
 class Evaluator:
@@ -29,314 +33,266 @@ class Evaluator:
         self.database = database
         self.driver = None
         self.report = {}
-        
+
     def connect(self):
-        """连接Neo4j"""
+        from neo4j import GraphDatabase
         try:
             self.driver = GraphDatabase.driver(
-                self.neo4j_uri,
-                auth=(self.neo4j_user, self.neo4j_password),
-                encrypted=False
-            )
-            with self.driver.session(database=self.database) as session:
-                session.run("RETURN 1")
-            logger.info(f"✅ 连接Neo4j成功")
+                self.neo4j_uri, auth=(self.neo4j_user, self.neo4j_password), encrypted=False)
+            with self.driver.session(database=self.database) as s:
+                s.run("RETURN 1").single()
+            logger.info("✅ 连接 Neo4j 成功")
             return True
         except Exception as e:
-            logger.error(f"❌ Neo4j连接失败: {e}")
+            logger.error(f"❌ Neo4j 连接失败: {e}")
             return False
-    
+
+    # ---- 图谱完整性 ----------------------------------------------------------
     def evaluate_graph_completeness(self):
-        """评估图谱完整性"""
         logger.info("评估图谱完整性...")
-        
-        try:
-            with self.driver.session(database=self.database) as session:
-                # 节点统计
-                node_stats = session.run("""
-                    MATCH (n)
-                    RETURN labels(n)[0] as label, count(*) as count
-                """)
-                
-                node_counts = {}
-                total_nodes = 0
-                for record in node_stats:
-                    label = record['label']
-                    count = record['count']
-                    node_counts[label] = count
-                    total_nodes += count
-                
-                # 关系统计
-                rel_stats = session.run("""
-                    MATCH ()-[r]->()
-                    RETURN type(r) as rel_type, count(*) as count
-                """)
-                
-                rel_counts = {}
-                total_rels = 0
-                for record in rel_stats:
-                    rel_type = record['rel_type']
-                    count = record['count']
-                    rel_counts[rel_type] = count
-                    total_rels += count
-                
-                logger.info(f"  节点总数: {total_nodes}")
-                logger.info(f"  关系总数: {total_rels}")
-                
-                self.report['graph_completeness'] = {
-                    'total_nodes': total_nodes,
-                    'nodes_by_type': node_counts,
-                    'total_relationships': total_rels,
-                    'relationships_by_type': rel_counts,
-                    'completeness_rate': min(1.0, total_nodes / 500) * min(1.0, total_rels / 1000)
-                }
-                
-                return True
-        except Exception as e:
-            logger.error(f"评估完整性失败: {e}")
-            return False
-    
-    def evaluate_model_quality(self, model_path):
-        """评估模型质量"""
-        logger.info("评估模型质量...")
-        
-        try:
-            if not Path(model_path).exists():
-                logger.warning(f"模型文件不存在: {model_path}")
-                self.report['model_quality'] = {
-                    'model_exists': False,
-                    'embedding_dim': 0,
-                    'entities_embedded': 0
-                }
-                return False
-            
-            with open(model_path, 'rb') as f:
-                model_data = pickle.load(f)
-            
-            embedding_dim = model_data.get('embedding_dim', 0)
-            num_entities = len(model_data.get('entity_embeddings', {}))
-            num_relations = len(model_data.get('relation_embeddings', {}))
-            
-            logger.info(f"  嵌入维度: {embedding_dim}")
-            logger.info(f"  嵌入实体数: {num_entities}")
-            logger.info(f"  嵌入关系数: {num_relations}")
-            
-            self.report['model_quality'] = {
-                'model_exists': True,
-                'embedding_dim': embedding_dim,
-                'entities_embedded': num_entities,
-                'relations_embedded': num_relations,
-                'model_saved_at': model_data.get('timestamp', 'unknown')
-            }
-            
-            return True
-        except Exception as e:
-            logger.error(f"评估模型失败: {e}")
-            return False
-    
-    def validate_schema(self):
-        """验证数据架构"""
-        logger.info("验证数据架构...")
-        
-        try:
-            with self.driver.session(database=self.database) as session:
-                # 检查是否有足够的节点
-                node_count = session.run("MATCH (n) RETURN count(n) as count").single()['count']
-                
-                # 检查是否有足够的关系
-                rel_count = session.run("MATCH ()-[r]->() RETURN count(r) as count").single()['count']
-                
-                # 检查关键标签是否存在
-                labels = session.run("CALL db.labels()").single()
-                label_list = labels[0] if labels else []
-                
-                expected_labels = ['Chip', 'TestStage', 'Parameter']
-                missing_labels = [l for l in expected_labels if l not in label_list]
-                
-                self.report['schema_validation'] = {
-                    'node_count': node_count,
-                    'relationship_count': rel_count,
-                    'labels_found': label_list,
-                    'missing_labels': missing_labels,
-                    'schema_valid': len(missing_labels) == 0
-                }
-                
-                logger.info(f"  节点数: {node_count}")
-                logger.info(f"  关系数: {rel_count}")
-                logger.info(f"  标签: {label_list}")
-                
-                return len(missing_labels) == 0
-        except Exception as e:
-            logger.error(f"架构验证失败: {e}")
-            return False
-    
-    def generate_evaluation_report(self, output_path):
-        """生成评估报告"""
-        logger.info("生成评估报告...")
-        
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        report_md = "# Phase 1 评估报告\n\n"
-        report_md += f"**生成时间**: {datetime.now().isoformat()}\n\n"
-        
-        # 图谱完整性
-        report_md += "## 📊 图谱完整性评估\n\n"
-        if 'graph_completeness' in self.report:
-            gc = self.report['graph_completeness']
-            report_md += f"- **节点总数**: {gc['total_nodes']} "
-            report_md += f"(目标: ≥500, {'✅' if gc['total_nodes'] >= 500 else '❌'})\n"
-            report_md += f"- **关系总数**: {gc['total_relationships']} "
-            report_md += f"(目标: ≥1000, {'✅' if gc['total_relationships'] >= 1000 else '❌'})\n"
-            report_md += f"- **完整性评分**: {gc['completeness_rate']:.2%}\n\n"
-            
-            report_md += "### 节点类型分布\n"
-            for node_type, count in gc['nodes_by_type'].items():
-                report_md += f"- {node_type}: {count}\n"
-            
-            report_md += "\n### 关系类型分布\n"
-            for rel_type, count in gc['relationships_by_type'].items():
-                report_md += f"- {rel_type}: {count}\n"
-        
-        # 模型质量
-        report_md += "\n## 🧠 模型质量评估\n\n"
-        if 'model_quality' in self.report:
-            mq = self.report['model_quality']
-            report_md += f"- **模型存在**: {'✅ 是' if mq['model_exists'] else '❌ 否'}\n"
-            report_md += f"- **嵌入维度**: {mq['embedding_dim']}\n"
-            report_md += f"- **嵌入实体数**: {mq['entities_embedded']}\n"
-            report_md += f"- **嵌入关系数**: {mq['relations_embedded']}\n"
-            if mq['model_exists']:
-                report_md += f"- **保存时间**: {mq['model_saved_at']}\n"
-        
-        # 架构验证
-        report_md += "\n## ✅ 架构验证\n\n"
-        if 'schema_validation' in self.report:
-            sv = self.report['schema_validation']
-            report_md += f"- **架构有效**: {'✅ 是' if sv['schema_valid'] else '❌ 否'}\n"
-            report_md += f"- **已找到标签**: {', '.join(sv['labels_found'])}\n"
-            if sv['missing_labels']:
-                report_md += f"- **缺失标签**: {', '.join(sv['missing_labels'])}\n"
-        
-        # 成功标准
-        report_md += "\n## 🎯 成功标准检查\n\n"
-        
-        checks = {
-            '知识图谱实体数 ≥ 500': 'graph_completeness' in self.report and 
-                                   self.report['graph_completeness']['total_nodes'] >= 500,
-            '关系数 ≥ 1000': 'graph_completeness' in self.report and 
-                             self.report['graph_completeness']['total_relationships'] >= 1000,
-            'TransE模型收敛': 'model_quality' in self.report and 
-                              self.report['model_quality']['model_exists'],
-            '完整性验证率 ≥ 90%': 'graph_completeness' in self.report and 
-                                self.report['graph_completeness']['completeness_rate'] >= 0.9
+        with self.driver.session(database=self.database) as s:
+            node_counts, total_nodes = {}, 0
+            for rec in s.run("MATCH (n) RETURN labels(n)[0] AS label, count(*) AS c"):
+                node_counts[rec['label']] = rec['c']; total_nodes += rec['c']
+            rel_counts, total_rels = {}, 0
+            for rec in s.run("MATCH ()-[r]->() RETURN type(r) AS t, count(*) AS c"):
+                rel_counts[rec['t']] = rec['c']; total_rels += rec['c']
+
+        completeness = min(1.0, total_nodes / 500) * min(1.0, total_rels / 1000)
+        logger.info(f"  节点 {total_nodes}, 关系 {total_rels}, 完整性 {completeness:.2%}")
+        self.report['graph_completeness'] = {
+            'total_nodes': total_nodes, 'nodes_by_type': node_counts,
+            'total_relationships': total_rels, 'relationships_by_type': rel_counts,
+            'completeness_rate': completeness,
         }
-        
-        success_count = 0
-        for check_name, passed in checks.items():
-            status = "✅" if passed else "❌"
-            report_md += f"- {status} {check_name}\n"
-            if passed:
-                success_count += 1
-        
-        report_md += f"\n**总体状态**: {success_count}/4 标准通过\n"
-        
-        # 建议
-        report_md += "\n## 💡 建议\n\n"
-        if 'graph_completeness' in self.report:
-            gc = self.report['graph_completeness']
-            if gc['total_nodes'] < 500:
-                report_md += "- 图谱节点数不足，建议增加更多数据或优化数据提取策略\n"
-            if gc['total_relationships'] < 1000:
-                report_md += "- 图谱关系数不足，建议检查关系定义或增加关系创建规则\n"
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(report_md)
-        
-        logger.info(f"✅ 报告已生成: {output_path}")
-    
-    def evaluate(self, model_path, output_path):
-        """执行完整的评估流程"""
+
+    # ---- 架构验证（修复 db.labels() 误用）-----------------------------------
+    def validate_schema(self):
+        logger.info("验证数据架构...")
+        with self.driver.session(database=self.database) as s:
+            node_count = s.run("MATCH (n) RETURN count(n) AS c").single()['c']
+            rel_count = s.run("MATCH ()-[r]->() RETURN count(r) AS c").single()['c']
+            # 正确读取：db.labels() 每行一个标签
+            label_list = [rec[0] for rec in s.run("CALL db.labels()")]
+
+        missing = [l for l in EXPECTED_LABELS if l not in label_list]
+        self.report['schema_validation'] = {
+            'node_count': node_count, 'relationship_count': rel_count,
+            'labels_found': label_list, 'missing_labels': missing,
+            'schema_valid': len(missing) == 0,
+        }
+        logger.info(f"  标签: {label_list}")
+        logger.info(f"  架构有效: {len(missing) == 0}" + (f", 缺失: {missing}" if missing else ""))
+
+    # ---- 模型质量 + 链路预测 -------------------------------------------------
+    def evaluate_model_quality(self, model_path):
+        logger.info("评估模型质量与链路预测...")
+        model_path = Path(model_path)
+        if not model_path.exists():
+            logger.warning(f"模型文件不存在: {model_path}")
+            self.report['model_quality'] = {'model_exists': False}
+            return
+
+        with open(model_path, 'rb') as f:
+            m = pickle.load(f)
+
+        E = m['entity_embeddings']
+        R = m['relation_embeddings']
+        losses = m.get('train_losses', [])
+        test = np.asarray(m.get('test_triples', np.empty((0, 3), dtype=np.int64)))
+
+        mq = {
+            'model_exists': True,
+            'embedding_dim': m.get('embedding_dim', E.shape[1]),
+            'entities_embedded': E.shape[0],
+            'relations_embedded': R.shape[0],
+            'final_loss': float(m.get('final_loss', losses[-1] if losses else float('nan'))),
+            'initial_loss': float(losses[0]) if losses else float('nan'),
+            'model_saved_at': m.get('timestamp', 'unknown'),
+        }
+
+        # 收敛性：损失显著下降
+        if losses:
+            mq['loss_reduction'] = float(losses[0] - losses[-1])
+            mq['converged'] = bool(losses[-1] < losses[0] * 0.7 and losses[-1] < m.get('margin', 1.0))
+        else:
+            mq['converged'] = False
+
+        # 链路预测 MRR / Hits@K（raw，对头尾分别预测取平均）
+        if len(test) > 0:
+            metrics = self._link_prediction(E, R, test)
+            mq.update(metrics)
+
+        self.report['model_quality'] = mq
+        logger.info(f"  final_loss={mq['final_loss']:.4f}, converged={mq['converged']}")
+        if 'mrr' in mq:
+            logger.info(f"  MRR={mq['mrr']:.4f}, Hits@1={mq['hits@1']:.4f}, "
+                        f"Hits@3={mq['hits@3']:.4f}, Hits@10={mq['hits@10']:.4f}")
+
+    @staticmethod
+    def _link_prediction(E, R, test, max_eval=2000):
+        n_ent = E.shape[0]
+        if len(test) > max_eval:
+            sel = np.random.default_rng(42).choice(len(test), size=max_eval, replace=False)
+            test = test[sel]
+        ranks = []
+        for h, r, t in test:
+            # 尾预测: ||E[h]+R[r] - E[*]||
+            d_tail = np.linalg.norm((E[h] + R[r])[None, :] - E, axis=1)
+            ranks.append(1 + int(np.sum(d_tail < d_tail[t])))
+            # 头预测: ||E[*]+R[r] - E[t]||
+            d_head = np.linalg.norm(E + (R[r] - E[t])[None, :], axis=1)
+            ranks.append(1 + int(np.sum(d_head < d_head[h])))
+        ranks = np.array(ranks, dtype=float)
+        return {
+            'eval_triples': int(len(test)),
+            'mean_rank': float(ranks.mean()),
+            'mrr': float(np.mean(1.0 / ranks)),
+            'hits@1': float(np.mean(ranks <= 1)),
+            'hits@3': float(np.mean(ranks <= 3)),
+            'hits@10': float(np.mean(ranks <= 10)),
+            'candidate_entities': int(n_ent),
+        }
+
+    # ---- 报告 ---------------------------------------------------------------
+    def generate_reports(self, eval_path, validation_path):
+        gc = self.report.get('graph_completeness', {})
+        mq = self.report.get('model_quality', {})
+        sv = self.report.get('schema_validation', {})
+
+        # 成功标准
+        checks = {
+            '知识图谱实体数 ≥ 500': gc.get('total_nodes', 0) >= 500,
+            '关系数 ≥ 1000': gc.get('total_relationships', 0) >= 1000,
+            '完整性验证率 ≥ 90%': gc.get('completeness_rate', 0) >= 0.9,
+            'TransE 模型收敛': mq.get('converged', False),
+            '架构标签完整': sv.get('schema_valid', False),
+        }
+        passed = sum(checks.values())
+
+        # ---- evaluation_report.md ----
+        md = "# Phase 1 评估报告\n\n"
+        md += f"**生成时间**: {datetime.now().isoformat()}\n\n"
+        md += "## 📊 图谱完整性评估\n\n"
+        md += f"- **节点总数**: {gc.get('total_nodes', 0)} (目标 ≥500, {'✅' if gc.get('total_nodes',0)>=500 else '❌'})\n"
+        md += f"- **关系总数**: {gc.get('total_relationships', 0)} (目标 ≥1000, {'✅' if gc.get('total_relationships',0)>=1000 else '❌'})\n"
+        md += f"- **完整性评分**: {gc.get('completeness_rate', 0):.2%}\n\n"
+        md += "### 节点类型分布\n"
+        for k, v in gc.get('nodes_by_type', {}).items():
+            md += f"- {k}: {v}\n"
+        md += "\n### 关系类型分布\n"
+        for k, v in gc.get('relationships_by_type', {}).items():
+            md += f"- {k}: {v}\n"
+
+        md += "\n## 🧠 模型质量评估\n\n"
+        md += f"- **模型存在**: {'✅ 是' if mq.get('model_exists') else '❌ 否'}\n"
+        if mq.get('model_exists'):
+            md += f"- **嵌入维度**: {mq.get('embedding_dim')}\n"
+            md += f"- **嵌入实体数**: {mq.get('entities_embedded')}\n"
+            md += f"- **嵌入关系数**: {mq.get('relations_embedded')}\n"
+            md += f"- **初始 Loss**: {mq.get('initial_loss', float('nan')):.4f}\n"
+            md += f"- **最终 Loss**: {mq.get('final_loss', float('nan')):.4f}\n"
+            md += f"- **收敛**: {'✅ 是' if mq.get('converged') else '❌ 否'}\n"
+            if 'mrr' in mq:
+                md += f"\n### 链路预测 (raw, 候选实体数={mq['candidate_entities']}, 评估三元组={mq['eval_triples']})\n"
+                md += f"- **MRR**: {mq['mrr']:.4f}\n"
+                md += f"- **Hits@1**: {mq['hits@1']:.4f}\n"
+                md += f"- **Hits@3**: {mq['hits@3']:.4f}\n"
+                md += f"- **Hits@10**: {mq['hits@10']:.4f}\n"
+                md += f"- **Mean Rank**: {mq['mean_rank']:.1f}\n"
+
+        md += "\n## ✅ 架构验证\n\n"
+        md += f"- **架构有效**: {'✅ 是' if sv.get('schema_valid') else '❌ 否'}\n"
+        md += f"- **已找到标签**: {', '.join(sv.get('labels_found', []))}\n"
+        if sv.get('missing_labels'):
+            md += f"- **缺失标签**: {', '.join(sv['missing_labels'])}\n"
+
+        md += "\n## 🎯 成功标准检查\n\n"
+        for name, ok in checks.items():
+            md += f"- {'✅' if ok else '❌'} {name}\n"
+        md += f"\n**总体状态**: {passed}/{len(checks)} 标准通过\n"
+
+        Path(eval_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(eval_path, 'w', encoding='utf-8') as f:
+            f.write(md)
+        logger.info(f"✅ 评估报告: {eval_path}")
+
+        # ---- transe_validation_report.md ----
+        vmd = "# Phase 1 TransE 验证报告\n\n"
+        vmd += f"**生成时间**: {datetime.now().isoformat()}\n\n"
+        if mq.get('model_exists'):
+            vmd += "## 训练\n\n"
+            vmd += f"- 嵌入维度: {mq.get('embedding_dim')}\n"
+            vmd += f"- 初始 Loss → 最终 Loss: {mq.get('initial_loss', float('nan')):.4f} → {mq.get('final_loss', float('nan')):.4f}\n"
+            vmd += f"- Loss 下降: {mq.get('loss_reduction', float('nan')):.4f}\n"
+            vmd += f"- 收敛判定: {'通过' if mq.get('converged') else '未通过'}\n\n"
+            if 'mrr' in mq:
+                vmd += "## 链路预测质量 (raw)\n\n"
+                vmd += "| 指标 | 数值 |\n|------|------|\n"
+                vmd += f"| MRR | {mq['mrr']:.4f} |\n"
+                vmd += f"| Hits@1 | {mq['hits@1']:.4f} |\n"
+                vmd += f"| Hits@3 | {mq['hits@3']:.4f} |\n"
+                vmd += f"| Hits@10 | {mq['hits@10']:.4f} |\n"
+                vmd += f"| Mean Rank | {mq['mean_rank']:.1f} |\n"
+                vmd += f"| 候选实体数 | {mq['candidate_entities']} |\n"
+                vmd += f"| 评估三元组 | {mq['eval_triples']} |\n"
+        else:
+            vmd += "模型不存在，无法验证。\n"
+        with open(validation_path, 'w', encoding='utf-8') as f:
+            f.write(vmd)
+        logger.info(f"✅ TransE 验证报告: {validation_path}")
+
+        return passed, len(checks)
+
+    def evaluate(self, model_path, eval_path, validation_path):
         logger.info("=" * 60)
         logger.info("Phase 1: 评估")
         logger.info("=" * 60)
-        
-        # 连接Neo4j
         if not self.connect():
             return False
-        
-        # 执行评估
         self.evaluate_graph_completeness()
-        self.evaluate_model_quality(model_path)
         self.validate_schema()
-        
-        # 生成报告
-        self.generate_evaluation_report(output_path)
-        
         self.driver.close()
-        
+        self.evaluate_model_quality(model_path)
+        passed, total = self.generate_reports(eval_path, validation_path)
         logger.info("=" * 60)
-        logger.info("✅ 评估完成！")
+        logger.info(f"✅ 评估完成！{passed}/{total} 标准通过")
         logger.info("=" * 60)
-        
         return True
 
 
 def load_config(config_path):
-    """加载配置文件"""
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        return config
-    except Exception as e:
-        logger.error(f"❌ 加载配置文件失败: {e}")
-        return None
+    with open(config_path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+
+def _resolve(p, base, up=False):
+    p = Path(p)
+    if p.is_absolute():
+        return p
+    return (base / '..' / p) if up else (base / p)
 
 
 def main():
     parser = argparse.ArgumentParser(description='Phase 1 评估脚本')
-    parser.add_argument('--config', type=str, default='../../config/neo4j.yaml',
-                       help='Neo4j配置文件')
-    parser.add_argument('--model_path', type=str, default='outputs/models/phase1_transe.pkl',
-                       help='模型路径')
-    parser.add_argument('--output_path', type=str,
-                       default='outputs/reports/evaluation_report.md',
-                       help='评估报告输出路径')
-    
+    parser.add_argument('--config', type=str, default='../../config/neo4j.yaml')
+    parser.add_argument('--model_path', type=str, default='outputs/models/phase1_transe.pkl')
+    parser.add_argument('--output_path', type=str, default='outputs/reports/evaluation_report.md')
+    parser.add_argument('--validation_path', type=str, default='outputs/reports/transe_validation_report.md')
     args = parser.parse_args()
-    
-    # 加载配置
-    config_path = Path(args.config)
-    if not config_path.is_absolute():
-        config_path = Path(__file__).parent.parent / args.config
-    
-    config = load_config(config_path)
-    if not config:
-        return
-    
-    neo4j_config = config['neo4j']
-    
-    # 转换路径
+
     script_dir = Path(__file__).parent
-    if not Path(args.model_path).is_absolute():
-        model_path = script_dir / '..' / args.model_path
-    else:
-        model_path = Path(args.model_path)
-    
-    if not Path(args.output_path).is_absolute():
-        output_path = script_dir / '..' / args.output_path
-    else:
-        output_path = Path(args.output_path)
-    
-    # 评估
-    evaluator = Evaluator(
-        neo4j_config['uri'],
-        neo4j_config['username'],
-        neo4j_config['password'],
+    config_path = _resolve(args.config, script_dir)  # '../../config/neo4j.yaml' -> Solid-Waste-Project/config
+    neo4j_config = load_config(config_path)['neo4j']
+
+    Evaluator(
+        neo4j_config['uri'], neo4j_config['username'], neo4j_config['password'],
         neo4j_config.get('database', 'neo4j')
+    ).evaluate(
+        str(_resolve(args.model_path, script_dir, up=True)),
+        str(_resolve(args.output_path, script_dir, up=True)),
+        str(_resolve(args.validation_path, script_dir, up=True)),
     )
-    
-    evaluator.evaluate(str(model_path), str(output_path))
 
 
 if __name__ == '__main__':

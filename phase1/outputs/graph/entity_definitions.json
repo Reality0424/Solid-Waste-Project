@@ -1,27 +1,52 @@
 {
-  "Chip": {
-    "count": 554,
+  "ChipModel": {
+    "count": 3,
     "attributes": [
-      "id",
-      "model",
-      "batch_id",
-      "manufacturing_date"
+      "key",
+      "name"
+    ]
+  },
+  "FailureMode": {
+    "count": 5,
+    "attributes": [
+      "key",
+      "name"
     ]
   },
   "TestStage": {
     "count": 5,
     "attributes": [
-      "stage_id",
-      "stage_name",
+      "key",
+      "name",
       "description"
     ]
   },
-  "Parameter": {
-    "count": 35,
+  "Dimension": {
+    "count": 4,
     "attributes": [
-      "param_id",
-      "param_name",
+      "key",
+      "name",
+      "test_stage"
+    ]
+  },
+  "Parameter": {
+    "count": 25,
+    "attributes": [
+      "key",
+      "name",
+      "dimension",
+      "test_stage",
       "data_type"
+    ]
+  },
+  "Chip": {
+    "count": 1000,
+    "attributes": [
+      "key",
+      "model",
+      "failure_mode",
+      "failure_status",
+      "embedding"
     ]
   }
 }
