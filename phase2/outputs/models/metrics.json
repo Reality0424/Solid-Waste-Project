@@ -1,0 +1,31 @@
+{
+  "eval": "5-fold OOF",
+  "gcn_gat": {
+    "accuracy": 0.803,
+    "auc": 0.8255025280552472,
+    "f1": 0.39755351681957185,
+    "recall": 0.6565656565656566
+  },
+  "final_classifier_gbm_optimized": {
+    "accuracy": 0.94,
+    "auc": 0.9613280417941904,
+    "f1": 0.7297297297297297,
+    "recall": 0.8181818181818182,
+    "threshold": 0.06
+  },
+  "linear_baseline_raw": {
+    "accuracy": 0.8,
+    "auc": 0.8449085752082423
+  },
+  "gbm_raw_auc": 0.9428468929023867,
+  "feature_optimization_auc_gain": 0.018481148891803745,
+  "engineered_features": [
+    "vnm_high",
+    "vnm_low",
+    "setup_slack",
+    "dyn_power",
+    "thermal_index",
+    "leak_total"
+  ],
+  "k": 10
+}

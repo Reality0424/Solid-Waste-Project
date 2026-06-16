@@ -1,0 +1,8 @@
+# Phase 2 依赖(在 Phase 1 venv 基础上额外需要)
+# 安装: .venv/bin/pip install -r phase2/requirements-phase2.txt
+torch>=2.0          # GCN+GAT(CPU 即可)
+shap>=0.44          # TreeSHAP 指标贡献度
+scikit-learn>=1.3   # GBM / 交叉验证(Phase1 已含)
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7

@@ -1,0 +1,21 @@
+{
+  "n_core": 6,
+  "core_indicators": [
+    "fmax_mhz",
+    "setup_time_ns",
+    "vol_voltage",
+    "warpage_um",
+    "vil_voltage",
+    "iol_leakage_ua"
+  ],
+  "target_accuracy": 0.88,
+  "core_cv_accuracy": 0.943,
+  "core_cv_auc": 0.8979136537405128,
+  "core_cv_recall": 0.5757575757575758,
+  "full_cv_accuracy": 0.96,
+  "full_cv_auc": 0.9428468929023867,
+  "n_full_indicators": 28,
+  "accuracy_retained_pct": 98.22916666666667,
+  "auc_retained_pct": 95.23430161353612,
+  "selection_rule": "min k in [5,10] with AUC>=95% of full AND acc>=0.88 (accuracy alone inflated by 10% imbalance)"
+}
