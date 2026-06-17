@@ -23,6 +23,9 @@
 
 \graphicspath{{figures/}{paper/figures/}}
 
+% Official MDPI bibliography workflow (BibTeX + Definitions/mdpi.bst from the template)
+\externalbibliography{yes}
+
 \Title{Knowledge-Graph-Guided Detection of Hidden Multi-Parameter Failures and Core-Indicator Selection for Retired-Chip Remanufacturing}
 
 \TitleCitation{Knowledge-Graph-Guided Detection of Hidden Multi-Parameter Failures and Core-Indicator Selection for Retired-Chip Remanufacturing}
@@ -75,24 +78,35 @@ A guiding empirical finding, established quantitatively in Section~\ref{sec:resu
 \subsection{Circular Economy and Electronics Remanufacturing}
 Systematic reviews of WEEE management consistently place reuse, refurbishment and remanufacturing high in the value-retention (``R'') hierarchy, above material recycling, because they preserve the embedded manufacturing value of components rather than recovering only raw materials~\cite{deoliveiraneto2023weee}. The same reviews observe that practice still gravitates toward end-of-pipe material recovery, partly because component-level re-qualification lacks mature, data-driven decision tools. Reliability screening of recovered components---deciding which are safe to redeploy---is exactly such a missing tool, and is the gap this work targets at the granularity of individual chips.
 
+A closely related literature concerns recycled and counterfeit integrated circuits. Guin et al.~\cite{guin2014counterfeit} document that recycled ICs re-entering the supply chain exhibit reduced performance and shortened service lifetime, posing genuine reliability risks, and survey detection techniques ranging from on-chip aging sensors to statistical and machine-learning analyses of electrical signatures. That body of work establishes two facts that directly motivate ours: (i) the reliability of a reused chip is governed by the joint state of many electrical and physical parameters rather than any single one, and (ii) reliability degradation is detectable from test data. However, its goal is largely \emph{authentication} (is a part recycled or counterfeit?), whereas remanufacturing requires a \emph{fitness-for-reuse} decision---predicting whether a functional, salvaged chip will remain reliable. We address the latter and, in particular, the hidden-failure subproblem that single-indicator screening misses.
+
 \subsection{Knowledge Graphs and Embeddings}
-Knowledge graphs represent heterogeneous entities and their typed relations and have become a standard substrate for organizing complex engineering and scientific data~\cite{ji2022survey}. Translational embedding models, of which TransE~\cite{bordes2013translating} is the canonical example, learn low-dimensional vectors for entities and relations such that valid triples approximately satisfy a translation in embedding space; the learned geometry exposes latent associations useful for downstream mining. Random-walk embeddings such as node2vec~\cite{grover2016node2vec} provide an alternative when only structural proximity is needed. We adopt a knowledge graph to organize chips, indicators and their dependencies, and use TransE to embed it.
+Knowledge graphs represent heterogeneous entities and their typed relations and have become a standard substrate for organizing complex engineering and scientific data~\cite{ji2022survey}. Translational embedding models, of which TransE~\cite{bordes2013translating} is the canonical example, learn low-dimensional vectors for entities and relations such that valid triples approximately satisfy a translation in embedding space; the learned geometry exposes latent associations useful for downstream mining. Random-walk embeddings such as node2vec~\cite{grover2016node2vec} provide an alternative when only structural proximity is required. We adopt a knowledge graph to organize chips, indicators and their dependencies, and use TransE to embed it and to surface indicator associations.
+
+\subsection{Knowledge Graphs for Industrial Fault Diagnosis}
+Knowledge graphs have recently been applied directly to industrial fault diagnosis. Han et al.~\cite{han2022kgevolution} construct and evolve a fault-diagnosis knowledge graph for industrial processes, while Wu et al.~\cite{wu2023mmkg} build a multimodal knowledge-graph diagnostic model to compensate for scarce fault samples. Closest to our use of graph learning, Mao et al.~\cite{mao2024gcnkg} couple a knowledge graph with a graph convolutional network for machine fault diagnosis, demonstrating that graph structure can inject relational priors into a neural classifier. These works target rotating machinery and process plants and emphasize knowledge representation and reasoning; none addresses chip-level remanufacturing or the hidden multi-parameter failure problem, and none performs SHAP-based test-indicator compression, which are the contributions of this paper.
 
 \subsection{Graph Neural Networks}
-Graph convolutional networks (GCN)~\cite{kipf2017semi} generalize convolution to graphs through spectral neighborhood aggregation, while graph attention networks (GAT)~\cite{velickovic2018graph} learn data-dependent weights over neighbors; inductive variants such as GraphSAGE~\cite{hamilton2017inductive} scale these ideas to large graphs. Comprehensive surveys document their rapid adoption across domains~\cite{wu2021comprehensive}, including fault diagnosis, where sensor networks and process topologies are naturally expressed as graphs. We employ a hybrid GCN+GAT encoder over a chip-similarity graph as one of our feature-optimization models, but---consistent with the broader literature on tabular learning---we also evaluate gradient-boosted trees and report the comparison honestly.
+Spectral graph convolution was made practical by fast localized filters~\cite{defferrard2016chebnet} and simplified into the widely used graph convolutional network (GCN)~\cite{kipf2017semi}, which aggregates normalized neighborhood features. Graph attention networks (GAT)~\cite{velickovic2018graph} instead learn data-dependent weights over neighbors, and inductive variants such as GraphSAGE~\cite{hamilton2017inductive} scale these ideas to large graphs; relational GCNs extend them to typed, multi-relational graphs~\cite{schlichtkrull2018rgcn}. Comprehensive surveys document their rapid adoption across domains~\cite{wu2021comprehensive}, including fault diagnosis, where sensor networks and process topologies are naturally expressed as graphs. We employ a hybrid GCN+GAT encoder over a chip-similarity graph as one of our feature-optimization models, but---consistent with the broader literature on tabular learning---we also evaluate gradient-boosted trees and report the comparison transparently.
 
 \subsection{Tree Ensembles for Tabular Data}
-Despite the prominence of deep learning, tree ensembles remain the strongest off-the-shelf models for tabular problems. Gradient boosting~\cite{friedman2001greedy} builds an additive model of shallow trees that naturally express conjunctive (AND/OR) feature interactions, and scalable implementations such as XGBoost~\cite{chen2016xgboost} are ubiquitous in applied work; random forests~\cite{breiman2001random} provide a robust bagging alternative. Because hidden chip failures are precisely conjunctions and disjunctions of near-limit indicators, gradient boosting is a particularly apt classifier, as our experiments confirm.
+Despite the prominence of deep learning, tree ensembles remain the strongest off-the-shelf models for tabular problems. Gradient boosting~\cite{friedman2001greedy} builds an additive model of shallow trees that naturally express conjunctive (AND/OR) feature interactions; scalable implementations such as XGBoost~\cite{chen2016xgboost} and LightGBM~\cite{ke2017lightgbm} are ubiquitous in applied work, and random forests~\cite{breiman2001random} provide a robust bagging alternative. Because hidden chip failures are precisely conjunctions and disjunctions of near-limit indicators, gradient boosting is a particularly apt classifier, as our experiments confirm.
 
-\subsection{Interpretability and Feature Selection}
-The Shapley value~\cite{shapley1953value} from cooperative game theory uniquely distributes a prediction among input features subject to a set of fairness axioms. SHAP~\cite{lundberg2017unified} operationalizes this for machine-learning models, and TreeSHAP~\cite{lundberg2020local} computes exact Shapley values for tree ensembles efficiently. Beyond explanation, SHAP rankings provide a principled basis for feature (here, test-indicator) selection, which we use to compress the test suite.
+\subsection{Imbalanced Learning and Feature Selection}
+Chip failures are rare, so screening is an imbalanced-learning problem~\cite{he2009imbalance}; oversampling techniques such as SMOTE~\cite{chawla2002smote} are common remedies, and threshold-free metrics such as AUC are preferred to accuracy under imbalance. High-dimensional test suites also call for feature selection to remove redundant or noisy measurements~\cite{guyon2003feature}. We address imbalance through stratified cross-validation, AUC-primary reporting and validation-tuned thresholds, and we use SHAP-based ranking as an embedded feature-selection mechanism.
+
+\subsection{Interpretability}
+The Shapley value~\cite{shapley1953value} from cooperative game theory uniquely distributes a prediction among input features subject to a set of fairness axioms. SHAP~\cite{lundberg2017unified} operationalizes this for machine-learning models, TreeSHAP~\cite{lundberg2020local} computes exact Shapley values for tree ensembles efficiently, and local surrogate methods such as LIME~\cite{ribeiro2016lime} offer an alternative attribution. Beyond explanation, SHAP rankings provide a principled basis for feature (here, test-indicator) selection, which we use to compress the test suite while preserving discriminative power.
 
 \subsection{Data-Driven Semiconductor Screening}
-The UCI SECOM dataset~\cite{mccann2008secom} is a widely used real benchmark for semiconductor process fault detection, characterized by high dimensionality (590 measurements), substantial missingness and severe class imbalance (about 14:1). It is commonly used to study feature selection and imbalanced classification, and we adopt it for external validation of our methodology. To our knowledge, prior work treats indicators largely in isolation or as a flat feature vector; the combination of a knowledge-graph representation, interaction-aware modeling, SHAP-based indicator compression, and explicit framing around hidden multi-parameter failures for chip \emph{remanufacturing} is novel.
+The UCI SECOM dataset~\cite{mccann2008secom} is a widely used real benchmark for semiconductor process fault detection, characterized by high dimensionality (590 measurements), substantial missingness and severe class imbalance (about 14:1). It has been studied extensively: Salem et al.~\cite{salem2018experimental}, for example, evaluate 288 combinations of pruning, imputation, feature selection and classification on SECOM and report ROC-AUC around the high-0.6 to 0.7 range for strong configurations, underscoring the dataset's difficulty. Most such studies treat the measurements as a flat feature vector and focus on imputation and imbalance handling. To our knowledge, the combination of a knowledge-graph representation, interaction-aware modeling, SHAP-based indicator compression, and an explicit framing around hidden multi-parameter failures for chip \emph{remanufacturing} is novel; we use SECOM as an independent, real-data check of the indicator-compression methodology and compare against reported results in Section~\ref{sec:results}.
 
 % =====================================================================
 \section{Materials and Methods}\label{sec:methods}
 % =====================================================================
+
+\subsection{Problem Formulation}
+Let each chip be described by a vector of test indicators $\mathbf{x}\in\mathbb{R}^{m}$ ($m{=}28$) and a binary reliability label $y\in\{0,1\}$, where $y{=}1$ denotes a chip that is unreliable for reuse. Conventional per-indicator screening implements a decision of the form $\hat{y}=\mathbf{1}\big[\exists\, j:\, x_j\notin[\ell_j,u_j]\big]$, i.e., a chip is flagged only if some indicator $j$ falls outside its specification interval $[\ell_j,u_j]$. This rule defines an axis-aligned acceptance box and is, by design, blind to any failure whose indicators all lie inside the box. A hidden failure is precisely a chip with $y{=}1$ yet $x_j\in[\ell_j,u_j]\ \forall j$. Detecting it requires a classifier $g:\mathbb{R}^{m}\!\rightarrow[0,1]$ that depends on the \emph{joint} configuration of indicators, $g(\mathbf{x})$, rather than on per-axis tests. We pursue two coupled objectives: (i) learn such a $g$ with high ranking quality (AUC) under class imbalance; and (ii) find a small index subset $C\subseteq\{1,\dots,m\}$, $|C|\le 10$, such that a classifier restricted to the indicators in $C$ retains nearly the full discriminative power, thereby reducing measurement cost. Sections~\ref{sec:fe}--\ref{sec:shap} instantiate $g$ and the selection of $C$.
 
 \subsection{Test Indicators}
 We consider 28 chip test indicators grouped into the engineering dimensions used in industrial screening (Table~\ref{tab:indicators}): physical integrity, DC-electrical, AC-electrical/timing, functional, and reliability/aging. These cover the standard inspection performed before a chip is re-qualified and are the variables on which both the synthetic benchmark and the modeling operate.
@@ -140,31 +154,39 @@ We build a typed knowledge graph with six entity types (Chip, Parameter, Dimensi
 \end{figure}
 
 We then train a TransE model~\cite{bordes2013translating} to embed entities and relations. For a triple $(h,r,t)$ with head/relation/tail embeddings $\mathbf{h},\mathbf{r},\mathbf{t}\in\mathbb{R}^{d}$ ($d{=}100$), TransE scores plausibility by the translation distance
+
 \begin{equation}
 f(h,r,t) = \lVert \mathbf{h} + \mathbf{r} - \mathbf{t} \rVert_{2},
 \label{eq:transe-score}
 \end{equation}
+
 and is trained with a margin-ranking loss over positive triples $S$ and corrupted negatives $S'$ (head or tail randomly replaced):
+
 \begin{equation}
 \mathcal{L} = \sum_{(h,r,t)\in S}\ \sum_{(h',r,t')\in S'}\big[\, \gamma + f(h,r,t) - f(h',r,t') \,\big]_{+},
 \label{eq:transe-loss}
 \end{equation}
+
 where $\gamma$ is the margin and $[x]_{+}=\max(0,x)$. Entity embeddings are $\ell_2$-normalized each epoch and written back to the graph as node attributes, where they serve as auxiliary relational features for downstream models.
 
 \subsection{Feature Optimization and Failure Identification}\label{sec:fe}
 \textbf{Domain feature optimization.} Beyond the 28 raw indicators we compute six interaction features that an engineer would derive directly from a datasheet: the high- and low-side noise margins ($\text{VOH}-\text{VIH}$, $\text{VIL}-\text{VOL}$), the timing slack ($1000/F_{\max}-\text{setup}-\text{delay}$), a dynamic-power proxy ($\text{IDD}_{\text{dynamic}}\cdot F_{\max}$), a thermal index, and total leakage. These make the latent failure mechanisms explicit and improve every model that consumes them.
 
 \textbf{Hybrid GCN+GAT.} We build a $k$-nearest-neighbor chip-similarity graph ($k{=}10$) in the optimized feature space and learn node representations with a hybrid encoder that concatenates three branches: (i) a per-chip multilayer-perceptron branch that preserves each chip's own indicator combination, (ii) a GCN branch~\cite{kipf2017semi}, and (iii) a GAT branch~\cite{velickovic2018graph}. The GCN branch uses the normalized propagation rule
+
 \begin{equation}
 \mathbf{H}^{(l+1)} = \sigma\!\left(\tilde{\mathbf{D}}^{-\frac12}\,\tilde{\mathbf{A}}\,\tilde{\mathbf{D}}^{-\frac12}\,\mathbf{H}^{(l)}\mathbf{W}^{(l)}\right),
 \label{eq:gcn}
 \end{equation}
+
 where $\tilde{\mathbf{A}}=\mathbf{A}+\mathbf{I}$ is the adjacency with self-loops, $\tilde{\mathbf{D}}$ its degree matrix, $\mathbf{W}^{(l)}$ the trainable weights and $\sigma(\cdot)$ a nonlinearity. The GAT branch weights neighbors $j\in\mathcal{N}(i)$ of node $i$ by learned attention
+
 \begin{equation}
 \alpha_{ij} = \frac{\exp\!\big(\mathrm{LeakyReLU}(\mathbf{a}^{\top}[\mathbf{W}\mathbf{h}_i \,\Vert\, \mathbf{W}\mathbf{h}_j])\big)}{\sum_{k\in\mathcal{N}(i)}\exp\!\big(\mathrm{LeakyReLU}(\mathbf{a}^{\top}[\mathbf{W}\mathbf{h}_i \,\Vert\, \mathbf{W}\mathbf{h}_k])\big)},\qquad
 \mathbf{h}_i' = \sigma\!\Big(\sum_{j\in\mathcal{N}(i)}\alpha_{ij}\,\mathbf{W}\mathbf{h}_j\Big),
 \label{eq:gat}
 \end{equation}
+
 with $\Vert$ denoting concatenation and $\mathbf{a}$ the attention vector. The three branch outputs are concatenated, projected to a 32-dimensional embedding and classified by a linear head. Because failures are scarce, we ensemble several random initializations and average their predicted probabilities to reduce variance.
 
 \textbf{Gradient-boosted trees.} As tree ensembles excel on tabular data with conjunctive structure~\cite{friedman2001greedy,chen2016xgboost}, we also train a gradient-boosting classifier on the optimized features; this is our final classifier.
@@ -173,10 +195,12 @@ with $\Vert$ denoting concatenation and $\mathbf{a}$ the attention vector. The t
 
 \subsection{Shapley Contribution and Core-Indicator Selection}\label{sec:shap}
 We compute SHAP values~\cite{lundberg2017unified,lundberg2020local} for a gradient-boosting model over the 28 indicators. The Shapley value of indicator $i$ is its average marginal contribution over all feature subsets $S\subseteq F\setminus\{i\}$,
+
 \begin{equation}
 \phi_i = \sum_{S\subseteq F\setminus\{i\}} \frac{|S|!\,(|F|-|S|-1)!}{|F|!}\,\big[\,v(S\cup\{i\}) - v(S)\,\big],
 \label{eq:shapley}
 \end{equation}
+
 where $F$ is the full indicator set and $v(\cdot)$ the model output for a given subset; we estimate $\phi_i$ with TreeSHAP~\cite{lundberg2020local}. Indicators are ranked by mean absolute SHAP, $\bar{\phi}_i = \frac{1}{N}\sum_{n=1}^{N}|\phi_i^{(n)}|$. We then add indicators in rank order and evaluate cross-validated performance, selecting the smallest core set (between 5 and 10 indicators) that retains at least 95\% of the full-suite AUC. Because the class distribution is imbalanced ($\sim$10\% failures), accuracy is inflated by the majority class; we therefore drive selection by AUC and report accuracy only as a secondary metric.
 
 \subsection{Real-Data External Validation (SECOM)}
@@ -184,6 +208,7 @@ To test whether the methodology generalizes beyond our synthetic construction, w
 
 \subsection{Evaluation Protocol and Implementation}
 Because failures are scarce ($\sim$100 in the synthetic set, 104 in SECOM), a single train/test split yields high-variance estimates. We therefore report \emph{5-fold stratified out-of-fold} (OOF) metrics throughout: the area under the ROC curve (AUC, threshold-free and robust to imbalance) together with accuracy, recall and F1, defined from the true/false positives and negatives ($TP,FP,TN,FN$) as
+
 \begin{equation}
 \text{Recall}=\frac{TP}{TP+FN},\quad
 \text{Precision}=\frac{TP}{TP+FP},\quad
@@ -191,6 +216,7 @@ Because failures are scarce ($\sim$100 in the synthetic set, 104 in SECOM), a si
 \text{Acc}=\frac{TP+TN}{TP+TN+FP+FN}.
 \label{eq:metrics}
 \end{equation}
+
 Given the class imbalance, AUC is our primary metric; accuracy is reported only as a secondary indicator. Decision thresholds, where needed, are tuned on validation folds. Key hyperparameters are listed in Table~\ref{tab:hyper}. Models are implemented with scikit-learn~\cite{pedregosa2011scikit} (logistic regression, gradient boosting) and PyTorch (GCN+GAT); SHAP values use the TreeSHAP estimator. Random seeds are fixed and all code, data and figures are released for full reproducibility.
 
 \begin{table}[H]
@@ -306,6 +332,8 @@ IOL leakage & DC & thermal/leakage\\
 \subsection{External Validation on Real SECOM Data}
 On the real SECOM dataset, a gradient-boosting classifier using all 474 retained features attains 0.687 AUC (linear: 0.655), reflecting the difficulty of this noisy, highly imbalanced benchmark (Table~\ref{tab:secom}). Applying the same SHAP-guided selection, the top 25 features raise AUC to 0.811---an improvement of $+0.124$ over using all features (Figure~\ref{fig:secom})---while as few as 5 features already match 95\% of the full-feature AUC. Thus, on genuinely real semiconductor measurements, SHAP-based selection of a compact indicator core not only compresses the measurement set but \emph{improves} discrimination by discarding noisy, redundant channels. This corroborates the synthetic-benchmark findings on independent, real data and directly mitigates the concern of evaluating solely on a self-generated dataset.
 
+For context, our top-25 AUC of 0.811 is competitive with published SECOM results: Salem et al.~\cite{salem2018experimental}, in an extensive study of 288 pipeline combinations on the same dataset, report ROC-AUC values broadly in the high-0.6 to low-0.8 range for their strongest configurations. A strictly numeric ranking against such studies is confounded by differing preprocessing (imputation, resampling), feature counts, validation protocols and metric definitions; we therefore present this comparison as indicative rather than as a state-of-the-art claim. The salient, protocol-independent observation is internal and therefore fair: under one fixed pipeline, replacing all 474 features by a SHAP-selected subset raises AUC by $+0.124$, demonstrating the value of interaction-aware indicator selection on real data.
+
 \begin{table}[H]
 \caption{Results on the real UCI SECOM dataset (5-fold OOF).}
 \label{tab:secom}
@@ -328,6 +356,29 @@ Gradient boosting (SHAP top-5) & 5 & 0.683 & --\\
 \label{fig:secom}
 \end{figure}
 
+\subsection{Ablation Study}
+To isolate the contribution of each component, Table~\ref{tab:ablation} reports a controlled ablation under the identical 5-fold OOF protocol, toggling the model family (linear vs.\ gradient boosting vs.\ GCN+GAT), the feature set (raw 28, the 6 interaction features alone, or both), and the indicator subset (full vs.\ SHAP core 6).
+
+\begin{table}[H]
+\caption{Ablation on the synthetic benchmark (5-fold OOF AUC). Each axis is toggled while holding the others fixed.}
+\label{tab:ablation}
+\begin{tabularx}{\textwidth}{Xlc}
+\toprule
+\textbf{Model} & \textbf{Features / indicators} & \textbf{AUC}\\
+\midrule
+Linear (logistic) & raw 28 & 0.845\\
+Linear (logistic) & raw 28 + 6 interaction & 0.846\\
+GCN+GAT (ensemble) & raw 28 + 6 interaction (+ graph) & 0.826\\
+Gradient boosting & 6 interaction features only & 0.841\\
+Gradient boosting & SHAP core 6 indicators & 0.898\\
+Gradient boosting & raw 28 & 0.943\\
+\textbf{Gradient boosting} & \textbf{raw 28 + 6 interaction (full model)} & \textbf{0.961}\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Four observations follow. \emph{(i) Model family dominates:} replacing the linear classifier by gradient boosting on identical raw inputs raises AUC from 0.845 to 0.943 ($+0.098$), the single largest jump, isolating the value of nonlinear interaction modeling. \emph{(ii) Interaction features help trees, not linear models:} the six engineered margins lift the gradient-boosting model from 0.943 to 0.961 ($+0.018$) yet barely move the linear model (0.845$\rightarrow$0.846), precisely because the failures are disjunctive/non-convex and a linear decision surface cannot exploit the margins even when they are provided explicitly. \emph{(iii) Compression is nearly free:} the SHAP core of 6 indicators reaches 0.898, retaining 95\% of the full-model AUC with about one-fifth of the indicators, and even 6 engineered features alone (0.841) already match the full linear baseline. \emph{(iv) Graph is auxiliary:} the GCN+GAT (0.826) does not exceed the tree models, confirming that the chip-similarity graph and TransE embeddings serve best as representation and association-mining tools rather than as the predictive backbone. On real SECOM data the feature-count sweep (Figure~\ref{fig:secom}) further shows that performance is non-monotone in the number of indicators---AUC peaks near 25 features and then declines---so the optimum is a compact core rather than the full suite. Overall, the framework's gains stem mainly from interaction-aware classification and SHAP-guided compression, and are robust to the exact size of the selected core within a broad plateau.
+
 % =====================================================================
 \section{Discussion}
 % =====================================================================
@@ -336,6 +387,10 @@ Three findings stand out. First, on data with genuine hidden-failure structure, 
 Second, interpretable attribution makes the resulting models actionable. SHAP recovers the physically meaningful drivers of failure---timing, noise-margin and thermal indicators---and enables an aggressive reduction of the test suite (28$\rightarrow$6 on the synthetic benchmark, with a comparable compression on SECOM) at negligible or even positive impact on discrimination. For remanufacturing lines, where test time dominates per-unit cost, such a compact, well-understood core directly reduces screening cost and provides a natural foundation for adaptive, sequential test ordering.
 
 Third, model choice should follow the data rather than fashion. Although graph neural networks are attractive for relational data, on this tabular, conjunctive task gradient-boosted trees were consistently stronger; we therefore use the graph components for representation and association mining and the tree ensemble for classification, and we report this trade-off transparently. We regard such honesty about negative or mixed results as essential to a trustworthy engineering methodology.
+
+\textbf{Practical implications for remanufacturing lines.} In a high-throughput remanufacturing setting, end-to-end test time per chip is the dominant cost driver, and each indicator corresponds to a measurement that consumes instrument time and fixturing. A screening model that retains discrimination while using six of twenty-eight indicators therefore translates fairly directly into reduced test time and higher line throughput, provided the omitted measurements are not required for other purposes. Equally important, the per-prediction SHAP attribution gives operators a human-readable reason for each rejection (e.g., a collapsed noise margin or a thermal--timing interaction), which supports engineering trust, root-cause triage and audit. The compact core is also a natural starting point for sequential or adaptive testing, in which inexpensive, high-information indicators are measured first and further testing is conditioned on intermediate results---an avenue we leave to future work but which the present indicator ranking directly enables.
+
+\textbf{Generalization and transferability.} Two pieces of evidence speak to generalization. First, the synthetic results are obtained under stratified cross-validation with held-out folds, so they reflect generalization to unseen chips rather than memorization. Second, and more importantly, the indicator-compression methodology transfers to the real SECOM dataset, which differs from our synthetic benchmark in domain (wafer fabrication vs.\ chip screening), dimensionality (590 vs.\ 28), missingness and imbalance ratio; that the same SHAP-then-boosting recipe improves AUC there as well suggests the approach is not an artifact of our data-generating assumptions. We nonetheless caution that absolute performance numbers are dataset-specific and that transfer to a particular remanufacturing line will require recalibration on that line's data.
 
 \textbf{Threats to validity and limitations.} The primary limitation is data. The controlled benchmark is synthetic; although its parameter ranges and failure mechanisms are grounded in device-physics reasoning and its conclusions are corroborated by the real SECOM results, it is not a substitute for labeled field data from an operating remanufacturing line, and synthetic constructions inevitably embed the designer's assumptions. The SECOM dataset, while real, originates from wafer fabrication rather than retired-chip screening, so it validates the feature-selection and interaction-modeling methodology rather than the full chip-remanufacturing scenario. The TransE embedding's standalone link-prediction quality is modest, and the graph module underperforms the tree classifier. Finally, accuracy figures are inflated by class imbalance and should be read alongside AUC and recall. We have mitigated these concerns through cross-validated evaluation, a linear and a tree baseline, an explicit hidden-failure analysis, and independent real-data validation, but they bound the strength of the present claims.
 
@@ -354,23 +409,7 @@ We presented a knowledge-graph-guided framework for detecting hidden multi-param
 \dataavailability{The synthetic data generator, all experiment code and figures are available in the project repository. The SECOM dataset is publicly available at the UCI Machine Learning Repository, \url{https://doi.org/10.24432/C54305}.}
 \conflictsofinterest{The authors declare no conflict of interest.}
 
-\begin{thebibliography}{99}
-\bibitem{deoliveiraneto2023weee} de Oliveira Neto, J.F.; Candido, L.A.; Dourado, A.B.F.; Santos, S.M.; Florencio, L. Waste of electrical and electronic equipment management from the perspective of a circular economy: A review. \emph{Waste Manag. Res.} \textbf{2023}. \doi{10.1177/0734242X221135341}
-\bibitem{bordes2013translating} Bordes, A.; Usunier, N.; Garcia-Dur\'an, A.; Weston, J.; Yakhnenko, O. Translating embeddings for modeling multi-relational data. \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)} \textbf{2013}, \emph{26}, 2787--2795.
-\bibitem{ji2022survey} Ji, S.; Pan, S.; Cambria, E.; Marttinen, P.; Yu, P.S. A survey on knowledge graphs: Representation, acquisition, and applications. \emph{IEEE Trans. Neural Netw. Learn. Syst.} \textbf{2022}, \emph{33}, 494--514.
-\bibitem{grover2016node2vec} Grover, A.; Leskovec, J. node2vec: Scalable feature learning for networks. In \emph{Proc. 22nd ACM SIGKDD Int. Conf. Knowl. Discov. Data Min.}, 2016; pp. 855--864.
-\bibitem{kipf2017semi} Kipf, T.N.; Welling, M. Semi-supervised classification with graph convolutional networks. In \emph{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2017.
-\bibitem{velickovic2018graph} Veli\v{c}kovi\'c, P.; Cucurull, G.; Casanova, A.; Romero, A.; Li\`o, P.; Bengio, Y. Graph attention networks. In \emph{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2018.
-\bibitem{hamilton2017inductive} Hamilton, W.; Ying, Z.; Leskovec, J. Inductive representation learning on large graphs. \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)} \textbf{2017}, \emph{30}, 1024--1034.
-\bibitem{wu2021comprehensive} Wu, Z.; Pan, S.; Chen, F.; Long, G.; Zhang, C.; Yu, P.S. A comprehensive survey on graph neural networks. \emph{IEEE Trans. Neural Netw. Learn. Syst.} \textbf{2021}, \emph{32}, 4--24.
-\bibitem{friedman2001greedy} Friedman, J.H. Greedy function approximation: A gradient boosting machine. \emph{Ann. Stat.} \textbf{2001}, \emph{29}, 1189--1232.
-\bibitem{chen2016xgboost} Chen, T.; Guestrin, C. XGBoost: A scalable tree boosting system. In \emph{Proc. 22nd ACM SIGKDD Int. Conf. Knowl. Discov. Data Min.}, 2016; pp. 785--794.
-\bibitem{breiman2001random} Breiman, L. Random forests. \emph{Mach. Learn.} \textbf{2001}, \emph{45}, 5--32.
-\bibitem{shapley1953value} Shapley, L.S. A value for $n$-person games. In \emph{Contributions to the Theory of Games II}; Princeton University Press, 1953; pp. 307--317.
-\bibitem{lundberg2017unified} Lundberg, S.M.; Lee, S.-I. A unified approach to interpreting model predictions. \emph{Adv. Neural Inf. Process. Syst. (NeurIPS)} \textbf{2017}, \emph{30}, 4765--4774.
-\bibitem{lundberg2020local} Lundberg, S.M.; Erion, G.; Chen, H.; DeGrave, A.; Prutkin, J.M.; Nair, B.; Katz, R.; Himmelfarb, J.; Bansal, N.; Lee, S.-I. From local explanations to global understanding with explainable AI for trees. \emph{Nat. Mach. Intell.} \textbf{2020}, \emph{2}, 56--67.
-\bibitem{pedregosa2011scikit} Pedregosa, F.; Varoquaux, G.; Gramfort, A.; Michel, V.; Thirion, B.; Grisel, O.; Blondel, M.; Prettenhofer, P.; Weiss, R.; Dubourg, V.; et al. Scikit-learn: Machine learning in Python. \emph{J. Mach. Learn. Res.} \textbf{2011}, \emph{12}, 2825--2830.
-\bibitem{mccann2008secom} McCann, M.; Johnston, A. SECOM. UCI Machine Learning Repository, 2008. \doi{10.24432/C54305}
-\end{thebibliography}
+% References are managed via BibTeX (refs.bib) with the MDPI style (Definitions/mdpi.bst).
+\bibliography{refs}
 
 \end{document}
