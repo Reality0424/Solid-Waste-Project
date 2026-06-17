@@ -1,0 +1,30 @@
+{
+  "dataset": "UCI SECOM (McCann & Johnston, 2008)",
+  "n_samples": 1567,
+  "n_features_raw": 590,
+  "n_features_after_constfilter": 474,
+  "n_fail": 104,
+  "imbalance_ratio": 14.067307692307693,
+  "full_feature": {
+    "linear": {
+      "auc": 0.6545691150954309,
+      "accuracy": 0.9087428206764518,
+      "recall_at_bal_thr": 0.3942307692307692,
+      "f1_at_bal_thr": 0.18468468468468469
+    },
+    "gbm": {
+      "auc": 0.686984068563016,
+      "accuracy": 0.9336311423101468,
+      "recall_at_bal_thr": 0.5865384615384616,
+      "f1_at_bal_thr": 0.23968565815324164
+    }
+  },
+  "core_selection": {
+    "full_gbm_auc": 0.686984068563016,
+    "min_k_for_95pct": 5,
+    "best_k": 25,
+    "best_k_auc": 0.8111822388138177,
+    "auc_improvement_vs_full": 0.12419817025080171
+  },
+  "eval": "5-fold stratified OOF"
+}
