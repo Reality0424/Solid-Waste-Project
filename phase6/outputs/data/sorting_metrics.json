@@ -1,0 +1,35 @@
+{
+  "sorting_accuracy": 0.947,
+  "precision_per_class": {
+    "reuse": 0.9580193756727664,
+    "repair": 0.7608695652173914,
+    "reject": 0.88
+  },
+  "confusion_matrix": [
+    [
+      890,
+      11,
+      0
+    ],
+    [
+      36,
+      35,
+      3
+    ],
+    [
+      3,
+      0,
+      22
+    ]
+  ],
+  "labels": [
+    "reuse",
+    "repair",
+    "reject"
+  ],
+  "class_counts": {
+    "reuse": 901,
+    "repair": 74,
+    "reject": 25
+  }
+}

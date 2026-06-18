@@ -1,0 +1,27 @@
+{
+  "physical_damage": {
+    "repair_method": "Component replacement or rejection",
+    "success_rate": 0.0,
+    "cost_yuan": 0,
+    "covered": true
+  },
+  "noise_margin_insufficient": {
+    "repair_method": "Frequency derate, voltage adjustment",
+    "success_rate": 0.75,
+    "cost_yuan": 80,
+    "covered": true
+  },
+  "thermal_accumulation": {
+    "repair_method": "Thermal management enhancement, derate operation",
+    "success_rate": 0.85,
+    "cost_yuan": 150,
+    "covered": true
+  },
+  "multi_param_combined": {
+    "repair_method": "Limited application scope, frequency cap",
+    "success_rate": 0.6,
+    "cost_yuan": 120,
+    "covered": true
+  },
+  "_coverage": 1.0
+}

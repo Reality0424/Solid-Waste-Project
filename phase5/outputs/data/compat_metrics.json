@@ -1,0 +1,12 @@
+{
+  "per_scenario_suitable_acc": {
+    "high_frequency_computing": 0.9739999999999999,
+    "power_efficient_device": 0.968,
+    "high_reliability_critical": 0.945,
+    "consumer_electronics": 0.951
+  },
+  "mean_suitable_acc": 0.9594999999999999,
+  "inference_latency_ms": 0.6922545799999824,
+  "kpi_acc_pass": true,
+  "kpi_latency_pass": true
+}

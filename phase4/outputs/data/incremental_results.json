@@ -1,0 +1,9 @@
+{
+  "acc_incremental": {
+    "v2": 0.8282828282828283,
+    "v3": 0.7474747474747475
+  },
+  "acc_full_retrain_v3": 0.8181818181818182,
+  "learning_efficiency": 0.9135802469135802,
+  "kpi_pass": true
+}
